@@ -1,0 +1,129 @@
+server:
+  port: ${SERVER_PORT:8080}
+
+security:
+  jwt:
+    secret: ${JWT_SECRET:neko-backend-local-dev-secret-2026-change-me}
+    issuer: ${JWT_ISSUER:NekoBackend}
+    access-token-ttl-seconds: ${JWT_ACCESS_TOKEN_TTL_SECONDS:7200}
+
+neko:
+  ratelimit:
+    enabled: ${RATE_LIMIT_ENABLED:true}
+    capacity: ${RATE_LIMIT_CAPACITY:20}
+    refill-tokens: ${RATE_LIMIT_REFILL_TOKENS:10}
+    refill-period: ${RATE_LIMIT_REFILL_PERIOD:10s}
+    request-cost: ${RATE_LIMIT_REQUEST_COST:1}
+    bucket-ttl-seconds: ${RATE_LIMIT_BUCKET_TTL_SECONDS:600}
+    trust-forwarded-headers: ${RATE_LIMIT_TRUST_FORWARDED_HEADERS:false}
+  mail:
+    verification:
+      ttl-seconds: ${MAIL_VERIFICATION_TTL_SECONDS:600}
+      code-length: ${MAIL_VERIFICATION_CODE_LENGTH:6}
+      from: ${MAIL_FROM:${MAIL_USERNAME:}}
+      subject-prefix: ${MAIL_VERIFICATION_SUBJECT_PREFIX:NekoBackend}
+  okhttp:
+    connect-timeout: ${OKHTTP_CONNECT_TIMEOUT:5s}
+    read-timeout: ${OKHTTP_READ_TIMEOUT:15s}
+    write-timeout: ${OKHTTP_WRITE_TIMEOUT:15s}
+    call-timeout: ${OKHTTP_CALL_TIMEOUT:30s}
+    max-idle-connections: ${OKHTTP_MAX_IDLE_CONNECTIONS:20}
+    keep-alive-duration: ${OKHTTP_KEEP_ALIVE_DURATION:5m}
+    retry-on-connection-failure: ${OKHTTP_RETRY_ON_CONNECTION_FAILURE:true}
+  file:
+    storage-path: ${FILE_STORAGE_PATH:./storage}
+    base-url: ${FILE_BASE_URL:http://localhost:8080}
+
+management:
+  endpoint:
+    health:
+      show-components: always
+      show-details: always
+  metrics:
+    enable:
+      executor: true
+      hikaricp: true
+      jdbc: true
+      jvm: true
+      logback: true
+      process: true
+      rabbitmq: true
+      system: true
+  endpoints:
+    jmx:
+      exposure:
+        include: "*"
+
+    web:
+      exposure:
+        include:
+          - health
+          - metrics
+          - info
+          - refresh
+
+spring:
+  application:
+    name: NekoProjectBackend
+  jmx:
+    enabled: true
+  mail:
+    host: ${MAIL_HOST:localhost}
+    port: ${MAIL_PORT:25}
+    username: ${MAIL_USERNAME:}
+    password: ${MAIL_PASSWORD:}
+    properties:
+      mail:
+        smtp:
+          auth: ${MAIL_SMTP_AUTH:true}
+          ssl:
+            enable: ${MAIL_SMTP_SSL_ENABLE:false}
+          starttls:
+            enable: ${MAIL_SMTP_STARTTLS_ENABLE:true}
+          connectiontimeout: ${MAIL_SMTP_CONNECTION_TIMEOUT:10000}
+          timeout: ${MAIL_SMTP_READ_TIMEOUT:10000}
+          writetimeout: ${MAIL_SMTP_WRITE_TIMEOUT:10000}
+  datasource:
+    url: ${DB_URL}
+    username: ${DB_USERNAME}
+    password: ${DB_PASSWORD}
+    driver-class-name: org.postgresql.Driver
+    hikari:
+      maximum-pool-size: 10
+      connection-timeout: 2000
+  servlet:
+    multipart:
+      max-file-size: ${FILE_MAX_SIZE:20MB}
+      max-request-size: ${FILE_MAX_REQUEST_SIZE:20MB}
+  config:
+    import: optional:file:.env[.properties]
+  jpa:
+    hibernate:
+      ddl-auto: ${DB_HIBERNATE_DDL_AUTO:none}
+    show-sql: false
+    database-platform: org.hibernate.dialect.PostgreSQLDialect
+    properties:
+      hibernate:
+        format_sql: true
+        jdbc:
+          batch_size: 20
+        order_inserts: true
+        order_updates: true
+
+  data:
+    redis:
+      host: ${REDIS_HOST}
+      port: ${REDIS_PORT:6379}
+      password: ${REDIS_PASSWORD}
+      database: ${REDIS_DATABASE:4}
+      timeout: ${REDIS_TIMEOUT:10000ms}
+
+logging:
+  level:
+    root: info
+    top.foxball.wsbackend: Debug
+  file:
+    name: ./logs/app.log
+  pattern:
+    file: "%d{yyyy-MM-dd HH:mm:ss} [%thread] %-5level %logger{50} - %msg%n"
+    console: "%clr(%d{yyyy-MM-dd HH:mm:ss}){faint} %clr([%thread]){cyan} %clr(%-5level){} %clr(%logger{50}){cyan} - %clr(%msg%n){magenta}"

@@ -1,0 +1,199 @@
+package `fun`.utf8.nekoprojectbackend.service
+
+import `fun`.utf8.nekoprojectbackend.datasource.jdbc.ObjectItemUpdate
+import `fun`.utf8.nekoprojectbackend.datasource.jdbc.ObjectItemUpdateRepository
+import `fun`.utf8.nekoprojectbackend.datasource.jdbc.ObjectItemUpdateStatus
+import `fun`.utf8.nekoprojectbackend.handlder.ParamErrorException
+import `fun`.utf8.nekoprojectbackend.handlder.ResourceNotFoundException
+import org.springframework.stereotype.Service
+import org.springframework.transaction.annotation.Transactional
+
+data class ObjectItemUpdateManageCreateRequest(
+    val controlPassword: String = "",
+    val title: String = "",
+    val content: String = "",
+    val imageUrl: String? = null,
+    val status: ObjectItemUpdateStatus? = ObjectItemUpdateStatus.PENDING,
+)
+
+data class ObjectItemUpdateManageUpdateRequest(
+    val controlPassword: String = "",
+    val title: String? = null,
+    val content: String? = null,
+    val imageUrl: String? = null,
+    val status: ObjectItemUpdateStatus? = null,
+)
+
+@Service
+class ObjectItemUpdateManagementService(
+    private val objectItemManagementService: ObjectItemManagementService,
+    private val objectItemUpdateRepository: ObjectItemUpdateRepository,
+) {
+
+    @Transactional(readOnly = true)
+    fun list(
+        objectItemId: Int,
+        status: ObjectItemUpdateStatus?,
+        request: ObjectItemManageVerifyRequest,
+    ): List<ObjectItemUpdateResponse> {
+        verifyProject(objectItemId, request)
+        val updates = if (status != null) {
+            objectItemUpdateRepository.findByObjectItemIdAndStatus(objectItemId, status)
+        } else {
+            objectItemUpdateRepository.findByObjectItemId(objectItemId)
+        }
+        return updates.asSequence()
+            .sortedBy { it.id ?: Int.MAX_VALUE }
+            .map { it.toResponse() }
+            .toList()
+    }
+
+    @Transactional
+    fun create(
+        objectItemId: Int,
+        request: ObjectItemUpdateManageCreateRequest,
+    ): ObjectItemUpdateResponse {
+        verifyProject(objectItemId, request.toVerifyRequest())
+        val entity = ObjectItemUpdate().also {
+            it.objectItemId = objectItemId
+            it.title = requireText(
+                request.title,
+                "动态标题不能为空",
+                MAX_TITLE_LENGTH,
+                "动态标题不能超过 $MAX_TITLE_LENGTH 个字符",
+            )
+            it.content = requireText(request.content, "动态内容不能为空")
+            it.imageUrl = normalizeNullableText(
+                request.imageUrl,
+                MAX_IMAGE_URL_LENGTH,
+                "动态图片 URL 不能超过 $MAX_IMAGE_URL_LENGTH 个字符",
+            )
+            it.status = request.status ?: ObjectItemUpdateStatus.PENDING
+        }
+        return objectItemUpdateRepository.save(entity).toResponse()
+    }
+
+    @Transactional
+    fun update(
+        objectItemId: Int,
+        updateId: Int,
+        request: ObjectItemUpdateManageUpdateRequest,
+    ): ObjectItemUpdateResponse {
+        verifyProject(objectItemId, request.toVerifyRequest())
+        val update = loadUpdate(updateId, objectItemId)
+        request.title?.let {
+            update.title = requireText(
+                it,
+                "动态标题不能为空",
+                MAX_TITLE_LENGTH,
+                "动态标题不能超过 $MAX_TITLE_LENGTH 个字符",
+            )
+        }
+        request.content?.let { update.content = requireText(it, "动态内容不能为空") }
+        request.imageUrl?.let {
+            update.imageUrl = normalizeNullableText(
+                it,
+                MAX_IMAGE_URL_LENGTH,
+                "动态图片 URL 不能超过 $MAX_IMAGE_URL_LENGTH 个字符",
+            )
+        }
+        request.status?.let { update.status = it }
+        return objectItemUpdateRepository.save(update).toResponse()
+    }
+
+    @Transactional
+    fun reviewByAdmin(
+        objectItemId: Int,
+        updateId: Int,
+        status: ObjectItemUpdateStatus,
+    ): ObjectItemUpdateResponse {
+        val update = loadUpdate(updateId, objectItemId)
+        update.status = status
+        return objectItemUpdateRepository.save(update).toResponse()
+    }
+
+    @Transactional
+    fun delete(
+        objectItemId: Int,
+        updateId: Int,
+        request: ObjectItemManageVerifyRequest,
+    ) {
+        verifyProject(objectItemId, request)
+        val update = loadUpdate(updateId, objectItemId)
+        update.status = ObjectItemUpdateStatus.DELETED
+        objectItemUpdateRepository.save(update)
+    }
+
+    private fun verifyProject(objectItemId: Int, request: ObjectItemManageVerifyRequest) {
+        objectItemManagementService.verify(objectItemId, request)
+    }
+
+    private fun loadUpdate(updateId: Int, objectItemId: Int): ObjectItemUpdate {
+        if (updateId <= 0) {
+            throw ParamErrorException("项目动态 ID 必须大于 0")
+        }
+        val update = objectItemUpdateRepository.findById(updateId)
+            .orElseThrow { ResourceNotFoundException("项目动态不存在") }
+        if (update.objectItemId != objectItemId) {
+            throw ResourceNotFoundException("项目动态不存在")
+        }
+        return update
+    }
+
+    private fun ObjectItemUpdateManageCreateRequest.toVerifyRequest() =
+        ObjectItemManageVerifyRequest(controlPassword = controlPassword)
+
+    private fun ObjectItemUpdateManageUpdateRequest.toVerifyRequest() =
+        ObjectItemManageVerifyRequest(controlPassword = controlPassword)
+
+    private fun requireText(value: String, blankMessage: String): String {
+        val normalized = value.trim()
+        if (normalized.isBlank()) {
+            throw ParamErrorException(blankMessage)
+        }
+        return normalized
+    }
+
+    private fun requireText(
+        value: String,
+        blankMessage: String,
+        maxLength: Int,
+        tooLongMessage: String,
+    ): String {
+        val normalized = requireText(value, blankMessage)
+        if (normalized.length > maxLength) {
+            throw ParamErrorException(tooLongMessage)
+        }
+        return normalized
+    }
+
+    private fun normalizeNullableText(value: String?): String? {
+        return value?.trim()?.ifBlank { null }
+    }
+
+    private fun normalizeNullableText(value: String?, maxLength: Int, tooLongMessage: String): String? {
+        val normalized = normalizeNullableText(value)
+        if (normalized != null && normalized.length > maxLength) {
+            throw ParamErrorException(tooLongMessage)
+        }
+        return normalized
+    }
+
+    private fun ObjectItemUpdate.toResponse(): ObjectItemUpdateResponse {
+        return ObjectItemUpdateResponse(
+            id = id,
+            objectItemId = objectItemId,
+            title = title,
+            content = content,
+            imageUrl = imageUrl,
+            status = status,
+            createTime = createTime,
+            updateTime = updateTime,
+        )
+    }
+
+    private companion object {
+        private const val MAX_TITLE_LENGTH = 128
+        private const val MAX_IMAGE_URL_LENGTH = 512
+    }
+}
