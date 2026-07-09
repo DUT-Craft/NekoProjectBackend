@@ -8,6 +8,7 @@ import jakarta.transaction.Transactional
 import org.springframework.security.crypto.password.PasswordEncoder
 import org.springframework.stereotype.Service
 
+/** 用户业务：注册（校验用户名/邮箱唯一并加密密码）、按用户名/邮箱/ID 查询。 */
 @Service
 class UserService(
     private val userRepository: UserRepository,

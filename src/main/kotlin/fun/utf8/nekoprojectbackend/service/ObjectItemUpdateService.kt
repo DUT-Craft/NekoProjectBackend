@@ -21,6 +21,7 @@ data class ObjectItemUpdateResponse(
     val updateTime: LocalDateTime?,
 )
 
+/** 项目动态业务：动态查询（默认仅返回已通过）。 */
 @Service
 class ObjectItemUpdateService(
     private val objectItemRepository: ObjectItemRepository,

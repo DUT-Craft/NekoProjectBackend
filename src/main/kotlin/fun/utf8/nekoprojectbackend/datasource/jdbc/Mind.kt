@@ -3,6 +3,7 @@ package `fun`.utf8.nekoprojectbackend.datasource.jdbc
 import jakarta.persistence.*
 import java.time.LocalDateTime
 
+/** 想法（Mind）实体：用户提交的创意/想法，含标题、正文、MC ID 及审核状态。 */
 @Entity
 @Table(
     name = "mind",
@@ -54,6 +55,7 @@ class Mind {
     }
 }
 
+/** 想法审核状态：待审核 / 通过 / 拒绝 / 已删除。 */
 enum class MindStatus {
     PENDING,
 

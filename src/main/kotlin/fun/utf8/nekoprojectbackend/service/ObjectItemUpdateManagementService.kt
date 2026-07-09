@@ -24,6 +24,7 @@ data class ObjectItemUpdateManageUpdateRequest(
     val status: ObjectItemUpdateStatus? = null,
 )
 
+/** 项目动态管理业务：凭项目控制密码创建/更新/删除动态，或管理员直接审核状态。 */
 @Service
 class ObjectItemUpdateManagementService(
     private val objectItemManagementService: ObjectItemManagementService,

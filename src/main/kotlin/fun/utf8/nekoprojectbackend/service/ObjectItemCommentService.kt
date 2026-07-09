@@ -25,6 +25,7 @@ data class ObjectItemCommentResponse(
     val updateTime: LocalDateTime?,
 )
 
+/** 项目评论业务：公开评论的创建与查询（查询默认仅返回已通过）。 */
 @Service
 class ObjectItemCommentService(
     private val objectItemRepository: ObjectItemRepository,

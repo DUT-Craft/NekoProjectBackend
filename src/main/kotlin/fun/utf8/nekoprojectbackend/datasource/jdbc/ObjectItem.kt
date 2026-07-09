@@ -2,6 +2,7 @@ package `fun`.utf8.nekoprojectbackend.datasource.jdbc
 
 import jakarta.persistence.*
 
+/** 项目条目实体：一个可招募成员的项目/工程。 */
 @Entity
 @Table(
     name = "object_item",
@@ -62,6 +63,7 @@ class ObjectItem {
     var controlPassword: String? = null
 }
 
+/** 招募需求项：岗位技能、人数、说明（嵌入项目条目集合表）。 */
 @Embeddable
 class NeedMemberItem {
     @Column(name = "skill", length = 64)
@@ -74,6 +76,7 @@ class NeedMemberItem {
     var context: String? = null
 }
 
+/** 项目状态：待审核→通过/拒绝，以及招募中/进行中/暂停等生命周期。 */
 enum class ObjectItemStatus {
     PENDING,
 

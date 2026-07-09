@@ -17,6 +17,7 @@ import org.springframework.web.servlet.NoHandlerFoundException
 import org.springframework.web.servlet.resource.NoResourceFoundException
 
 
+/** 全局异常处理：将各类异常转换为统一 [Response] 响应。 */
 @Order(2)
 @RestControllerAdvice
 class GlobalExceptionHandler {

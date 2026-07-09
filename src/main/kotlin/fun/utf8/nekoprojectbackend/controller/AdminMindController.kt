@@ -7,6 +7,7 @@ import `fun`.utf8.nekoprojectbackend.shared.ResponseBuilder
 import org.springframework.http.ResponseEntity
 import org.springframework.web.bind.annotation.*
 
+/** 管理端想法接口（/api/admin/minds）：分页列表与批量改状态。 */
 @RestController
 @RequestMapping("/api/admin/minds")
 class AdminMindController(

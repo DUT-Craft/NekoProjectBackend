@@ -9,6 +9,7 @@ import `fun`.utf8.nekoprojectbackend.shared.ResponseBuilder
 import org.springframework.http.ResponseEntity
 import org.springframework.web.bind.annotation.*
 
+/** 项目条目管理接口（/api/admin/project/object-items）：凭控制密码管理项目、评论、动态、申请。 */
 @RestController
 @RequestMapping("/api/admin/project/object-items")
 class AdminObjectController(

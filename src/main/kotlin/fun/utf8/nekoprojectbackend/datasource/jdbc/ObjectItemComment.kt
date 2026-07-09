@@ -3,6 +3,7 @@ package `fun`.utf8.nekoprojectbackend.datasource.jdbc
 import jakarta.persistence.*
 import java.time.LocalDateTime
 
+/** 项目评论实体：对某项目条目的公开评论，需审核。 */
 @Entity
 @Table(
     name = "object_item_comment",
@@ -50,6 +51,7 @@ class ObjectItemComment {
     }
 }
 
+/** 评论审核状态：待审核 / 通过 / 拒绝 / 已删除。 */
 enum class ObjectItemCommentStatus {
     PENDING,
 

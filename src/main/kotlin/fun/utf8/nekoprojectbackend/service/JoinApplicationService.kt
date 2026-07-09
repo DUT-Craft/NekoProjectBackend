@@ -32,6 +32,7 @@ data class JoinApplicationResponse(
     val updateTime: LocalDateTime?,
 )
 
+/** 加入申请业务：用户提交入组申请并校验昵称/MC ID/联系方式/理由等字段。 */
 @Service
 class JoinApplicationService(
     private val objectItemRepository: ObjectItemRepository,

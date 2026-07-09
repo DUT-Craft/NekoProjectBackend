@@ -6,6 +6,7 @@ import org.springframework.context.event.EventListener
 import org.springframework.data.redis.core.RedisTemplate
 import org.springframework.stereotype.Component
 
+/** 应用启动时按配置清空 Redis（默认开启），用于本地/测试重置数据。 */
 @Component
 class RedisCleanupConfig(
     private val redisTemplate: RedisTemplate<Any, Any>,

@@ -6,6 +6,7 @@ security:
     secret: ${JWT_SECRET:neko-backend-local-dev-secret-2026-change-me}
     issuer: ${JWT_ISSUER:NekoBackend}
     access-token-ttl-seconds: ${JWT_ACCESS_TOKEN_TTL_SECONDS:7200}
+    refresh-token-ttl-seconds: ${JWT_REFRESH_TOKEN_TTL_SECONDS:604800}
 
 neko:
   ratelimit:

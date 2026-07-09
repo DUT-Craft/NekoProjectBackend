@@ -11,6 +11,7 @@ import org.springframework.http.ResponseEntity
 import org.springframework.web.bind.annotation.*
 import java.time.LocalDateTime
 
+/** 项目条目公开接口（/api/project/object-items）：增删改查、评论、动态、加入申请。 */
 @RestController
 @RequestMapping("/api/project/object-items")
 class ObjectItemController(

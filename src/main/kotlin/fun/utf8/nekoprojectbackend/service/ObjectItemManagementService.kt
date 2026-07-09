@@ -33,6 +33,10 @@ data class ObjectItemPasswordChangeRequest(
     val newControlPassword: String? = null,
 )
 
+/**
+ * 项目条目管理业务：基于「项目控制密码」鉴权后执行更新/改密/删除。
+ * 存储的密码可能是 BCrypt 哈希（新）或历史明文（旧），见 [matchesPassword]。
+ */
 @Service
 class ObjectItemManagementService(
     private val objectItemRepository: ObjectItemRepository,
@@ -92,6 +96,7 @@ class ObjectItemManagementService(
         return item
     }
 
+    /** 校验控制密码：BCrypt 哈希走 [org.springframework.security.crypto.password.PasswordEncoder.matches]；历史明文走 [constantTimeEquals] 常量时间比较。 */
     private fun matchesPassword(rawPassword: String?, storedPassword: String?): Boolean {
         if (rawPassword.isNullOrBlank() || storedPassword.isNullOrBlank()) {
             return false
@@ -120,6 +125,7 @@ class ObjectItemManagementService(
         return id
     }
 
+    /** 常量时间字符串比较，避免明文密码校验时的时序侧信道。 */
     private fun constantTimeEquals(a: String, b: String): Boolean {
         if (a.length != b.length) {
             return false

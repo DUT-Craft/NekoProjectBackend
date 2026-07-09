@@ -13,6 +13,7 @@ data class ObjectItemCommentManageStatusRequest(
     val status: ObjectItemCommentStatus = ObjectItemCommentStatus.APPROVED,
 )
 
+/** 项目评论管理业务：凭项目控制密码查看/审核/删除评论，或管理员直接审核状态。 */
 @Service
 class ObjectItemCommentManagementService(
     private val objectItemManagementService: ObjectItemManagementService,

@@ -75,6 +75,7 @@ enum class MindSortProperty(val alias: String) {
 
 // SortDirection 定义于 ObjectItemService.kt，此处不再重复声明，避免同包重复定义。
 
+/** 想法业务。当前为桩实现，各方法均以 [TODO] 抛出，待补充。 */
 @Service
 class MindService {
 

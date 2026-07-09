@@ -8,6 +8,7 @@ import org.springframework.http.ResponseEntity
 import org.springframework.web.bind.annotation.*
 import java.time.LocalDateTime
 
+/** 想法公开接口（/api/project/minds）。 */
 @RestController
 @RequestMapping("/api/project/minds")
 class MindController(

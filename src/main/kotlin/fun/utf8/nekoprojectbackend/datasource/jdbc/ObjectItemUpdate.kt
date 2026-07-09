@@ -3,6 +3,7 @@ package `fun`.utf8.nekoprojectbackend.datasource.jdbc
 import jakarta.persistence.*
 import java.time.LocalDateTime
 
+/** 项目动态实体：项目条目下的进展更新公告，需审核。 */
 @Entity
 @Table(
     name = "object_item_update",
@@ -53,6 +54,7 @@ class ObjectItemUpdate {
     }
 }
 
+/** 动态审核状态：待审核 / 通过 / 拒绝 / 已删除。 */
 enum class ObjectItemUpdateStatus {
     PENDING,
 

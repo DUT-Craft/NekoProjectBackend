@@ -2,6 +2,7 @@ package `fun`.utf8.nekoprojectbackend.datasource.jdbc
 
 import jakarta.persistence.*
 
+/** 用户实体。 */
 @Entity
 @Table(name = "users")
 class User(
@@ -28,6 +29,7 @@ class User(
 
 )
 
+/** 账号状态：正常 / 封禁。 */
 enum class Status {
     ACTIVE,
 

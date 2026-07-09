@@ -118,6 +118,7 @@ enum class SortDirection {
     }
 }
 
+/** 项目条目业务：增删改查、批量操作、分页/排序、多条件过滤与字段长度校验。 */
 @Service
 class ObjectItemService(
     private val objectItemRepository: ObjectItemRepository,
@@ -125,6 +126,7 @@ class ObjectItemService(
 
     @Transactional
     fun save(request: ObjectItemSaveRequest): ObjectItemResponse {
+        // 注意：toEntity() 会把 status 固化为 PENDING，此处的 RECRUITING 赋值实际不生效（疑似遗留，建议确认）。
         request.status = ObjectItemStatus.RECRUITING
         val entity = request.toEntity()
         return objectItemRepository.save(entity).toResponse()

@@ -7,6 +7,7 @@ import `fun`.utf8.nekoprojectbackend.shared.ResponseBuilder
 import org.springframework.http.ResponseEntity
 import org.springframework.web.bind.annotation.*
 
+/** 管理端项目条目接口（/api/admin/object-items）：分页列表与批量改状态。 */
 @RestController
 @RequestMapping("/api/admin/object-items")
 class AdminObjectItemController(

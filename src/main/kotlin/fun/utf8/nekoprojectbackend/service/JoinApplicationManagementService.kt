@@ -13,6 +13,7 @@ data class JoinApplicationRejectRequest(
     val rejectReason: String? = null,
 )
 
+/** 加入申请管理业务：凭项目控制密码查看/接受/拒绝申请。 */
 @Service
 class JoinApplicationManagementService(
     private val objectItemManagementService: ObjectItemManagementService,

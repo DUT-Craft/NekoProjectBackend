@@ -3,6 +3,7 @@ package `fun`.utf8.nekoprojectbackend.datasource.jdbc
 import jakarta.persistence.*
 import java.time.LocalDateTime
 
+/** 加入申请实体：用户对某项目条目的入组申请，含联系方式与处理状态。 */
 @Entity
 @Table(
     name = "join_application",
@@ -62,6 +63,7 @@ class JoinApplication {
     }
 }
 
+/** 申请处理状态：待处理 / 已联系 / 已接受 / 已拒绝。 */
 enum class JoinApplicationStatus {
     PENDING,
 

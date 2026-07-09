@@ -5,6 +5,7 @@ import org.springframework.http.HttpStatus
 import org.springframework.http.ResponseEntity
 import org.springframework.stereotype.Component
 
+/** 构造统一 [org.springframework.http.ResponseEntity]/[Response] 的建造者，封装常见 HTTP 状态及分页/重试头。 */
 @Component
 class ResponseBuilder {
 
