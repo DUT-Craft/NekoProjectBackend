@@ -511,6 +511,6 @@ class ObjectItemService(
         private const val MAX_CONTACT_INFORMATION_LENGTH = 255
         private const val MAX_CONTROL_PASSWORD_LENGTH = 255
         private const val MAX_TAG_LENGTH = 32
-        private const val MAX_PAGE_SIZE = 100
+        private const val MAX_PAGE_SIZE = 1024
     }
 }

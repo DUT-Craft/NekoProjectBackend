@@ -27,6 +27,15 @@ class ObjectItemCommentManagementService(
         request: ObjectItemManageVerifyRequest,
     ): List<ObjectItemCommentResponse> {
         verifyProject(objectItemId, request)
+        return listByAdmin(objectItemId, status)
+    }
+
+    /** 管理员查看项目评论：JWT 鉴权（由控制器层保证），无需项目控制密码。 */
+    @Transactional(readOnly = true)
+    fun listByAdmin(
+        objectItemId: Int,
+        status: ObjectItemCommentStatus?,
+    ): List<ObjectItemCommentResponse> {
         val comments = if (status != null) {
             objectItemCommentRepository.findByObjectItemIdAndStatus(objectItemId, status)
         } else {

@@ -323,6 +323,6 @@ class MindService(
         private const val MAX_TITLE_LENGTH = 128
         private const val MAX_NICK_NAME_LENGTH = 64
         private const val MAX_MC_ID_LENGTH = 64
-        private const val MAX_PAGE_SIZE = 100
+        private const val MAX_PAGE_SIZE = 1024
     }
 }

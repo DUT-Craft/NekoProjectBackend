@@ -13,7 +13,12 @@ data class JoinApplicationRejectRequest(
     val rejectReason: String? = null,
 )
 
-/** 加入申请管理业务：凭项目控制密码查看/接受/拒绝申请。 */
+/** 管理员拒绝加入申请请求体：JWT 鉴权下无需项目控制密码，仅携带可选拒绝理由。 */
+data class JoinApplicationAdminRejectRequest(
+    val rejectReason: String? = null,
+)
+
+/** 加入申请管理业务：凭项目控制密码查看/接受/拒绝申请，或管理员（JWT）直接处理。 */
 @Service
 class JoinApplicationManagementService(
     private val objectItemManagementService: ObjectItemManagementService,
@@ -27,6 +32,15 @@ class JoinApplicationManagementService(
         request: ObjectItemManageVerifyRequest,
     ): List<JoinApplicationResponse> {
         verifyProject(objectItemId, request)
+        return listByAdmin(objectItemId, status)
+    }
+
+    /** 管理员查看加入申请：JWT 鉴权（由控制器层保证），无需项目控制密码。 */
+    @Transactional(readOnly = true)
+    fun listByAdmin(
+        objectItemId: Int,
+        status: JoinApplicationStatus?,
+    ): List<JoinApplicationResponse> {
         val applications = if (status != null) {
             joinApplicationRepository.findByObjectItemIdAndStatus(objectItemId, status)
         } else {
@@ -45,6 +59,15 @@ class JoinApplicationManagementService(
         request: ObjectItemManageVerifyRequest,
     ): JoinApplicationResponse {
         verifyProject(objectItemId, request)
+        return acceptByAdmin(objectItemId, applicationId)
+    }
+
+    /** 管理员同意加入申请：JWT 鉴权，无需项目控制密码。 */
+    @Transactional
+    fun acceptByAdmin(
+        objectItemId: Int,
+        applicationId: Int,
+    ): JoinApplicationResponse {
         val application = loadApplication(applicationId, objectItemId)
         application.status = JoinApplicationStatus.ACCEPTED
         return joinApplicationRepository.save(application).toResponse()
@@ -57,9 +80,19 @@ class JoinApplicationManagementService(
         request: JoinApplicationRejectRequest,
     ): JoinApplicationResponse {
         verifyProject(objectItemId, ObjectItemManageVerifyRequest(request.controlPassword))
+        return rejectByAdmin(objectItemId, applicationId, request.rejectReason)
+    }
+
+    /** 管理员拒绝加入申请：JWT 鉴权，无需项目控制密码。 */
+    @Transactional
+    fun rejectByAdmin(
+        objectItemId: Int,
+        applicationId: Int,
+        rejectReason: String?,
+    ): JoinApplicationResponse {
         val application = loadApplication(applicationId, objectItemId)
         application.status = JoinApplicationStatus.REJECTED
-        application.rejectReason = normalizeRejectReason(request.rejectReason)
+        application.rejectReason = normalizeRejectReason(rejectReason)
         return joinApplicationRepository.save(application).toResponse()
     }
 

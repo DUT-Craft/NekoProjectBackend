@@ -38,6 +38,15 @@ class ObjectItemUpdateManagementService(
         request: ObjectItemManageVerifyRequest,
     ): List<ObjectItemUpdateResponse> {
         verifyProject(objectItemId, request)
+        return listByAdmin(objectItemId, status)
+    }
+
+    /** 管理员查看项目动态：JWT 鉴权（由控制器层保证），无需项目控制密码。 */
+    @Transactional(readOnly = true)
+    fun listByAdmin(
+        objectItemId: Int,
+        status: ObjectItemUpdateStatus?,
+    ): List<ObjectItemUpdateResponse> {
         val updates = if (status != null) {
             objectItemUpdateRepository.findByObjectItemIdAndStatus(objectItemId, status)
         } else {
@@ -55,6 +64,15 @@ class ObjectItemUpdateManagementService(
         request: ObjectItemUpdateManageCreateRequest,
     ): ObjectItemUpdateResponse {
         verifyProject(objectItemId, request.toVerifyRequest())
+        return createByAdmin(objectItemId, request)
+    }
+
+    /** 管理员发布项目动态：JWT 鉴权，无需项目控制密码。 */
+    @Transactional
+    fun createByAdmin(
+        objectItemId: Int,
+        request: ObjectItemUpdateManageCreateRequest,
+    ): ObjectItemUpdateResponse {
         val entity = ObjectItemUpdate().also {
             it.objectItemId = objectItemId
             it.title = requireText(
@@ -81,24 +99,18 @@ class ObjectItemUpdateManagementService(
         request: ObjectItemUpdateManageUpdateRequest,
     ): ObjectItemUpdateResponse {
         verifyProject(objectItemId, request.toVerifyRequest())
+        return updateByAdmin(objectItemId, updateId, request)
+    }
+
+    /** 管理员修改项目动态：JWT 鉴权，无需项目控制密码。空值字段表示不修改。 */
+    @Transactional
+    fun updateByAdmin(
+        objectItemId: Int,
+        updateId: Int,
+        request: ObjectItemUpdateManageUpdateRequest,
+    ): ObjectItemUpdateResponse {
         val update = loadUpdate(updateId, objectItemId)
-        request.title?.let {
-            update.title = requireText(
-                it,
-                "动态标题不能为空",
-                MAX_TITLE_LENGTH,
-                "动态标题不能超过 $MAX_TITLE_LENGTH 个字符",
-            )
-        }
-        request.content?.let { update.content = requireText(it, "动态内容不能为空") }
-        request.imageUrl?.let {
-            update.imageUrl = normalizeNullableText(
-                it,
-                MAX_IMAGE_URL_LENGTH,
-                "动态图片 URL 不能超过 $MAX_IMAGE_URL_LENGTH 个字符",
-            )
-        }
-        request.status?.let { update.status = it }
+        applyUpdateFields(update, request)
         return objectItemUpdateRepository.save(update).toResponse()
     }
 
@@ -120,9 +132,39 @@ class ObjectItemUpdateManagementService(
         request: ObjectItemManageVerifyRequest,
     ) {
         verifyProject(objectItemId, request)
+        deleteByAdmin(objectItemId, updateId)
+    }
+
+    /** 管理员删除项目动态（软删除置 DELETED）：JWT 鉴权，无需项目控制密码。 */
+    @Transactional
+    fun deleteByAdmin(
+        objectItemId: Int,
+        updateId: Int,
+    ) {
         val update = loadUpdate(updateId, objectItemId)
         update.status = ObjectItemUpdateStatus.DELETED
         objectItemUpdateRepository.save(update)
+    }
+
+    /** 把编辑请求的非空字段应用到动态实体，供项目方 / 管理员更新复用。 */
+    private fun applyUpdateFields(update: ObjectItemUpdate, request: ObjectItemUpdateManageUpdateRequest) {
+        request.title?.let {
+            update.title = requireText(
+                it,
+                "动态标题不能为空",
+                MAX_TITLE_LENGTH,
+                "动态标题不能超过 $MAX_TITLE_LENGTH 个字符",
+            )
+        }
+        request.content?.let { update.content = requireText(it, "动态内容不能为空") }
+        request.imageUrl?.let {
+            update.imageUrl = normalizeNullableText(
+                it,
+                MAX_IMAGE_URL_LENGTH,
+                "动态图片 URL 不能超过 $MAX_IMAGE_URL_LENGTH 个字符",
+            )
+        }
+        request.status?.let { update.status = it }
     }
 
     private fun verifyProject(objectItemId: Int, request: ObjectItemManageVerifyRequest) {
