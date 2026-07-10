@@ -20,12 +20,12 @@ class AuthService(
 ) {
 
     data class LoginRequest(val username: String, val password: String)
-    data class RefreshRequest(val refreshToken: String)
     data class LoginResponse(
         val accessToken: String,
         val refreshToken: String,
         val tokenType: String,
         val expiresIn: Long,
+        val refreshExpiresIn: Long,
     )
 
     fun login(req: LoginRequest): LoginResponse {
@@ -42,8 +42,8 @@ class AuthService(
         tokenStore.invalidateAccess(jti, userId)
     }
 
-    fun refresh(req: RefreshRequest): LoginResponse {
-        val claims = jwtService.parse(req.refreshToken) // 签名 + 过期校验，失败抛 Token*Exception
+    fun refresh(refreshToken: String): LoginResponse {
+        val claims = jwtService.parse(refreshToken) // 签名 + 过期校验，失败抛 Token*Exception
         if (claims.get(CLAIM_TYPE, String::class.java) != TYPE_REFRESH) {
             throw TokenInvalidException("非刷新令牌")
         }
@@ -61,7 +61,7 @@ class AuthService(
         val refresh = jwtService.issueRefreshToken(userId, username, props.refreshTokenTtlSeconds)
         tokenStore.saveAccess(access.jti, userId, Duration.ofSeconds(access.ttlSeconds))
         tokenStore.saveRefresh(refresh.jti, userId, Duration.ofSeconds(refresh.ttlSeconds))
-        return LoginResponse(access.token, refresh.token, "Bearer", access.ttlSeconds)
+        return LoginResponse(access.token, refresh.token, "Bearer", access.ttlSeconds, refresh.ttlSeconds)
     }
 
     private companion object {

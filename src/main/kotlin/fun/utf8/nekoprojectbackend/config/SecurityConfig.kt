@@ -6,6 +6,7 @@ import `fun`.utf8.nekoprojectbackend.security.JwtAuthenticationFilter
 import org.springframework.boot.context.properties.EnableConfigurationProperties
 import org.springframework.context.annotation.Bean
 import org.springframework.context.annotation.Configuration
+import org.springframework.http.HttpMethod
 import org.springframework.security.config.annotation.web.builders.HttpSecurity
 import org.springframework.security.config.http.SessionCreationPolicy
 import org.springframework.security.web.SecurityFilterChain
@@ -14,9 +15,19 @@ import org.springframework.web.cors.CorsConfiguration
 import org.springframework.web.cors.CorsConfigurationSource
 import org.springframework.web.cors.UrlBasedCorsConfigurationSource
 
-/** Spring Security 配置：无状态 JWT、放行登录/刷新接口、注册 JWT 过滤器并统一 401/403 响应。 */
+/**
+ * Spring Security 配置：无状态 JWT。
+ *
+ * 鉴权分级（authorizeHttpRequests 按声明顺序首匹配）：
+ *  - 登录 / 刷新：不要求 JWT（refresh 走 HttpOnly Cookie）
+ *  - 公开查询 GET（项目 / 想法列表、详情、计数、子资源）：匿名可访问
+ *  - 公开投稿 POST（新项目 / 想法 / 评论 / 加入申请）：匿名提交，后端固定 PENDING 待审
+ *  - 项目方自服务（admin/project 下）：凭 controlPassword 鉴权，非 JWT，由 service 层校验
+ *  - 其余（管理端 admin/object-items、admin/minds，以及 auth/logout、auth/me，
+ *    还有 project 下的写入 PUT/DELETE/batch）均需 JWT
+ */
 @Configuration
-@EnableConfigurationProperties(JwtProperties::class)
+@EnableConfigurationProperties(JwtProperties::class, TokenCookieProperties::class)
 class SecurityConfig(
     private val jwtFilter: JwtAuthenticationFilter,
     private val authEntryPoint: JsonAuthEntryPoint,
@@ -30,8 +41,23 @@ class SecurityConfig(
             .cors { it.configurationSource(corsConfigurationSource()) }
             .sessionManagement { it.sessionCreationPolicy(SessionCreationPolicy.STATELESS) }
             .authorizeHttpRequests {
+                // 登录 / 刷新：不要求 JWT（刷新令牌走 HttpOnly Cookie）
                 it.requestMatchers("/api/auth/login", "/api/auth/refresh", "/error").permitAll()
+                // 公开查询（GET）：项目 / 想法的列表、详情、计数、动态、评论，匿名可访问
+                it.requestMatchers(HttpMethod.GET, "/api/project/**").permitAll()
+                // 公开投稿（POST）：新项目 / 想法 / 评论 / 加入申请，匿名提交（后端固定 PENDING 待审）
+                it.requestMatchers(
+                    HttpMethod.POST,
+                    "/api/project/object-items",
+                    "/api/project/object-items/*/comments",
+                    "/api/project/object-items/*/join-applications",
+                    "/api/project/minds",
+                ).permitAll()
+                // 项目方自服务：凭 controlPassword 鉴权（非 JWT），安全层放行，由 service 层校验密码
+                it.requestMatchers("/api/admin/project/**").permitAll()
                 it.requestMatchers("/actuator/health", "/actuator/info").permitAll()
+                // 其余接口需 JWT：管理端 /api/admin/object-items、/api/admin/minds、/api/auth/logout、/api/auth/me，
+                // 以及 /api/project/** 下的写入（PUT/DELETE/batch）——这些由登录管理员携带 token 调用
                 it.anyRequest().authenticated()
             }
             .exceptionHandling {

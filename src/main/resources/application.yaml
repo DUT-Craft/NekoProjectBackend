@@ -9,28 +9,20 @@ security:
     refresh-token-ttl-seconds: ${JWT_REFRESH_TOKEN_TTL_SECONDS:604800}
 
 neko:
-  ratelimit:
-    enabled: ${RATE_LIMIT_ENABLED:true}
-    capacity: ${RATE_LIMIT_CAPACITY:20}
-    refill-tokens: ${RATE_LIMIT_REFILL_TOKENS:10}
-    refill-period: ${RATE_LIMIT_REFILL_PERIOD:10s}
-    request-cost: ${RATE_LIMIT_REQUEST_COST:1}
-    bucket-ttl-seconds: ${RATE_LIMIT_BUCKET_TTL_SECONDS:600}
-    trust-forwarded-headers: ${RATE_LIMIT_TRUST_FORWARDED_HEADERS:false}
+  security:
+    cookie:
+      name: ${COOKIE_NAME:nekobox_refresh}
+      domain: ${COOKIE_DOMAIN:}
+      path: ${COOKIE_PATH:/}
+      secure: ${COOKIE_SECURE:false}
+      http-only: ${COOKIE_HTTP_ONLY:true}
+      same-site: ${COOKIE_SAME_SITE:Lax}
   mail:
     verification:
       ttl-seconds: ${MAIL_VERIFICATION_TTL_SECONDS:600}
       code-length: ${MAIL_VERIFICATION_CODE_LENGTH:6}
       from: ${MAIL_FROM:${MAIL_USERNAME:}}
       subject-prefix: ${MAIL_VERIFICATION_SUBJECT_PREFIX:NekoBackend}
-  okhttp:
-    connect-timeout: ${OKHTTP_CONNECT_TIMEOUT:5s}
-    read-timeout: ${OKHTTP_READ_TIMEOUT:15s}
-    write-timeout: ${OKHTTP_WRITE_TIMEOUT:15s}
-    call-timeout: ${OKHTTP_CALL_TIMEOUT:30s}
-    max-idle-connections: ${OKHTTP_MAX_IDLE_CONNECTIONS:20}
-    keep-alive-duration: ${OKHTTP_KEEP_ALIVE_DURATION:5m}
-    retry-on-connection-failure: ${OKHTTP_RETRY_ON_CONNECTION_FAILURE:true}
   file:
     storage-path: ${FILE_STORAGE_PATH:./storage}
     base-url: ${FILE_BASE_URL:http://localhost:8080}
@@ -100,7 +92,7 @@ spring:
     import: optional:file:.env[.properties]
   jpa:
     hibernate:
-      ddl-auto: ${DB_HIBERNATE_DDL_AUTO:none}
+      ddl-auto: ${DB_HIBERNATE_DDL_AUTO:create}
     show-sql: false
     database-platform: org.hibernate.dialect.PostgreSQLDialect
     properties:
