@@ -236,6 +236,7 @@ class DataSeeder(
         val status: Status,
         val role: Role,
     )
+
     private data class SeedMind(val title: String, val content: String, val mcId: String, val status: MindStatus)
     private data class SeedNeed(val skill: String, val number: Int, val context: String)
     private data class SeedObject(

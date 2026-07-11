@@ -208,7 +208,12 @@ class MindService(
 
         return source.asSequence()
             .filter { normalizedTitle == null || it.title?.contains(normalizedTitle, ignoreCase = true) == true }
-            .filter { normalizedNickName == null || it.nickName?.contains(normalizedNickName, ignoreCase = true) == true }
+            .filter {
+                normalizedNickName == null || it.nickName?.contains(
+                    normalizedNickName,
+                    ignoreCase = true
+                ) == true
+            }
             .filter { !filterByStatus || it.status in requestedStatuses }
             .filter { normalizedMcId == null || it.mcId?.equals(normalizedMcId, ignoreCase = true) == true }
             .toList()
@@ -242,7 +247,8 @@ class MindService(
 
     private fun MindSaveRequest.toEntity(): Mind = Mind().also {
         it.title = requireText(title, "想法标题不能为空", MAX_TITLE_LENGTH, "想法标题不能超过 $MAX_TITLE_LENGTH 个字符")
-        it.nickName = normalizeNullableText(nickName, MAX_NICK_NAME_LENGTH, "想法昵称不能超过 $MAX_NICK_NAME_LENGTH 个字符")
+        it.nickName =
+            normalizeNullableText(nickName, MAX_NICK_NAME_LENGTH, "想法昵称不能超过 $MAX_NICK_NAME_LENGTH 个字符")
         it.status = MindStatus.PENDING
         it.content = requireText(content ?: "", "想法内容不能为空")
         it.mcId = normalizeNullableText(mcId, MAX_MC_ID_LENGTH, "想法 Minecraft ID 不能超过 $MAX_MC_ID_LENGTH 个字符")
