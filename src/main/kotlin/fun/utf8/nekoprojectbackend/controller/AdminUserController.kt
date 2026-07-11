@@ -2,7 +2,6 @@ package `fun`.utf8.nekoprojectbackend.controller
 
 import `fun`.utf8.nekoprojectbackend.datasource.jdbc.Role
 import `fun`.utf8.nekoprojectbackend.datasource.jdbc.Status
-import `fun`.utf8.nekoprojectbackend.handlder.ForbiddenException
 import `fun`.utf8.nekoprojectbackend.security.LoginUser
 import `fun`.utf8.nekoprojectbackend.service.AccessService
 import `fun`.utf8.nekoprojectbackend.service.OperationLogService
@@ -42,9 +41,8 @@ class AdminUserController(
         @AuthenticationPrincipal admin: LoginUser,
         @RequestBody req: CreateUserRequest,
     ): ResponseEntity<Response> {
-        if (admin.username != ADMIN_USERNAME) {
-            throw ForbiddenException("仅管理员（admin）可创建用户")
-        }
+        // 仅总管理可创建用户（基于角色判定，而非用户名字符串——后者在 neko.admin.username 改名后失效）
+        accessService.requireSuperAdmin(admin)
         val user = userService.createUser(req.username, req.password, req.email, req.role)
         operationLogService.record(
             operator = admin,
@@ -90,9 +88,5 @@ class AdminUserController(
             ManagerSummary(id = it.id!!, username = it.username, nickname = it.nickname)
         }
         return builder.ok().data(rs).build()
-    }
-
-    private companion object {
-        const val ADMIN_USERNAME = "admin"
     }
 }

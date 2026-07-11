@@ -90,7 +90,7 @@ class AuthService(
         return issueTokens(user)
     }
 
-    /** 邮箱验证登录：校验邮箱验证码（绑定 email+UA）+ 密码。 */
+    /** 邮箱验证登录：校验邮箱验证码（绑定 email+UA）+ 账号归属 + 密码。 */
     fun loginByEmail(req: EmailLoginRequest, userAgent: String): LoginResponse {
         // 校验验证码（匿名场景，按 email+UA 绑定）
         verificationCodeService.verifyAndConsume(
@@ -105,7 +105,8 @@ class AuthService(
         val user = userService.findByEmail(req.email)
             ?: throw UsernameOrPasswordErrorException()
         if (user.status == Status.BANNED) throw UserDisabledException()
-        if (user.username != req.account.trim() && user.email != req.email.trim()) {
+        // account 必须与该邮箱归属账号的用户名一致，防止用他人邮箱验证码登录任意账号
+        if (user.username != req.account.trim()) {
             throw UsernameOrPasswordErrorException()
         }
         if (!passwordEncoder.matches(req.password, user.password)) {
@@ -114,8 +115,16 @@ class AuthService(
         return issueTokens(user)
     }
 
-    fun logout(jti: String, userId: Long) {
+    fun logout(jti: String, userId: Long, refreshToken: String?) {
         tokenStore.invalidateAccess(jti, userId)
+        // 一并服务端吊销刷新令牌：仅清浏览器 cookie 不够，已泄露的 refresh 值仍可换出新令牌
+        refreshToken?.let { revokeRefreshSafely(it, userId) }
+    }
+
+    /** 解析刷新令牌 jti 并服务端删除；过期 / 无效则静默跳过——登出不应因 cookie 中令牌失效而失败。 */
+    private fun revokeRefreshSafely(refreshToken: String, userId: Long) {
+        val jti = runCatching { jwtService.parse(refreshToken).id }.getOrNull() ?: return
+        tokenStore.revokeRefresh(jti, userId)
     }
 
     fun refresh(refreshToken: String): LoginResponse {
@@ -131,6 +140,8 @@ class AuthService(
         // 重新读取用户，确保刷新后 token 内角色与当前一致
         val user = userService.findById(userId)
             ?: throw TokenInvalidException("用户不存在")
+        // 被禁用的账号不得凭旧刷新令牌续期，封禁后立即生效
+        if (user.status == Status.BANNED) throw UserDisabledException()
         return issueTokens(user)
     }
 
@@ -154,17 +165,19 @@ class AuthService(
             }
 
             VerificationCodeService.Scene.CHANGE_PASSWORD -> {
-                // 改密码确认：必须带 userId 且与邮箱归属一致
-                val userId = req.userId ?: throw ParamErrorException("缺少用户身份")
-                val user = userService.findById(userId) ?: throw UserNotFoundException()
-                if (user.email != email) throw ParamErrorException("邮箱与当前用户不匹配")
+                // 改密码确认：校验邮箱归属某真实账号（防对未注册邮箱发码刷量）。
+                // 验证码 key 只绑 email+UA（与改密码时一致），不引入 userId——
+                // 发码接口是匿名的，传来的 userId 无法核验归属，强绑会导致发码/校验两处 key 不一致。
+                if (userService.findByEmail(email) == null) {
+                    throw UserNotFoundException("该邮箱未注册")
+                }
             }
         }
         verificationCodeService.checkAndRecordSend(email)
         val ctx = VerificationCodeService.CodeContext(
             scene = req.scene,
             email = email,
-            userId = if (req.scene == VerificationCodeService.Scene.CHANGE_PASSWORD) req.userId else null,
+            userId = null,
             userAgent = userAgent,
         )
         val code = verificationCodeService.generate(ctx)
@@ -207,7 +220,7 @@ class AuthService(
             VerificationCodeService.CodeContext(
                 scene = VerificationCodeService.Scene.CHANGE_PASSWORD,
                 email = req.email,
-                userId = userId,
+                userId = null,
                 userAgent = userAgent,
             ),
             req.emailCode,

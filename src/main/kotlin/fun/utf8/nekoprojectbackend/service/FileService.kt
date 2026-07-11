@@ -15,6 +15,7 @@ import org.springframework.transaction.annotation.Transactional
 import org.springframework.web.multipart.MultipartFile
 import java.io.InputStream
 import java.time.LocalDateTime
+import javax.imageio.ImageIO
 
 data class FileUploadResponse(
     val id: Long?,
@@ -58,6 +59,7 @@ class FileService(
 
         validateExtension(extension, policy, category)
         validateSize(file.size, policy, category)
+        validateContent(file, category)
 
         val storedName = storageService.store(file, extension)
         val record = FileRecord().apply {
@@ -100,8 +102,16 @@ class FileService(
         val publicOk = record.publicRead == true &&
                 record.category == FileCategory.IMAGE &&
                 properties.publicReadImage
-        if (!publicOk && user == null) {
-            throw ForbiddenException("请登录后下载")
+        if (!publicOk) {
+            // 私有文件：须登录且为所有者或总管理，防止已登录的任意用户越权下载他人文档
+            if (user == null) {
+                throw ForbiddenException("请登录后下载")
+            }
+            val isOwner = record.uploaderId == user.id
+            val isSuper = user.role == Role.SUPER_ADMIN
+            if (!isOwner && !isSuper) {
+                throw ForbiddenException("无权下载该文件")
+            }
         }
         val stream = storageService.openInputStream(storedName)
         return record to stream
@@ -136,6 +146,37 @@ class FileService(
         }
     }
 
+    /**
+     * 内容真实性校验：防伪装扩展名（如 .exe 改名 .png）。
+     * - 图片：用 ImageIO 试读，读不出（返回 null）即判定非真实图片；
+     * - MIME 一致性：file.contentType 若提供，需与声明的 category 大类匹配（图片 MIME 需以 image 开头）。
+     * 仅扩展名校验不够——客户端可任意伪造文件名与 Content-Type。
+     */
+    private fun validateContent(file: MultipartFile, category: FileCategory) {
+        val mime = file.contentType
+        if (!mime.isNullOrBlank()) {
+            val isImageMime = mime.startsWith("image/", ignoreCase = true)
+            if (category == FileCategory.IMAGE && !isImageMime) {
+                throw ParamErrorException("图片文件的 MIME 不是 image 类型：$mime")
+            }
+        }
+        if (category == FileCategory.IMAGE) {
+            val ext = extractExtension(file.originalFilename ?: "")
+            // ImageIO 只内置支持 jpg/png/gif/bmp；svg（XML）和 webp（需第三方插件）
+            // 不在支持范围内，对这两种格式跳过 ImageIO 试读，仅依赖 MIME 校验。
+            if (ext in IMAGEIO_DECODABLE_EXTS) {
+                val decoded = try {
+                    file.inputStream.use { ImageIO.read(it) }
+                } catch (e: Exception) {
+                    null
+                }
+                if (decoded == null) {
+                    throw ParamErrorException("文件不是有效的图片（内容无法解析），请确认文件完整性")
+                }
+            }
+        }
+    }
+
     private fun extractExtension(name: String): String {
         val idx = name.lastIndexOf('.')
         return if (idx >= 0) name.substring(idx + 1).lowercase() else ""
@@ -158,5 +199,8 @@ class FileService(
     private companion object {
         const val DEFAULT_LIST_SIZE = 20
         const val MAX_LIST_SIZE = 100
+
+        /** JDK ImageIO 原生可解码的图片格式；svg/webp 需第三方插件，跳过试读。 */
+        val IMAGEIO_DECODABLE_EXTS = setOf("jpg", "jpeg", "png", "gif", "bmp")
     }
 }

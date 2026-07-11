@@ -194,8 +194,11 @@ class AuthController(
     }
 
     @PostMapping("/logout")
-    fun logout(@AuthenticationPrincipal user: LoginUser): ResponseEntity<Response> {
-        authService.logout(user.jti, user.id)
+    fun logout(
+        @AuthenticationPrincipal user: LoginUser,
+        request: HttpServletRequest,
+    ): ResponseEntity<Response> {
+        authService.logout(user.jti, user.id, refreshCookie.read(request.cookies))
         operationLogService.record(operator = user, action = "LOGOUT", description = "登出")
 
         data class LogoutResult(

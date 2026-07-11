@@ -37,6 +37,7 @@ class OperationLogService(
     @Value("\${neko.audit.max-size-mb:50}") private val maxSizeMb: Long,
     @Value("\${neko.audit.max-archives:30}") private val maxArchives: Int,
     @Value("\${neko.audit.enabled:true}") private val enabled: Boolean,
+    @Value("\${neko.audit.trust-forwarded:false}") private val trustForwarded: Boolean,
 ) {
     private val appLog = LoggerFactory.getLogger(javaClass)
     private val maxBytes: Long = maxSizeMb.coerceAtLeast(1) * 1024L * 1024L
@@ -120,11 +121,16 @@ class OperationLogService(
             RequestContextHolder.getRequestAttributes() as? ServletRequestAttributes
         }.getOrNull() ?: return null
         val request = attrs.request
-        request.getHeader("X-Forwarded-For")?.let {
-            val first = it.substringBefore(',').trim()
-            if (first.isNotEmpty()) return first
+        // 仅在部署于可信反向代理后端时才采信 X-Forwarded-For / X-Real-IP：
+        // 这些头客户端可随意伪造，未部署反代时直接信任会让攻击者注入任意假 IP 污染审计日志。
+        // neko.audit.trust-forwarded 默认 false，部署在 Nginx/网关后才开启。
+        if (trustForwarded) {
+            request.getHeader("X-Forwarded-For")?.let {
+                val first = it.substringBefore(',').trim()
+                if (first.isNotEmpty()) return first
+            }
+            request.getHeader("X-Real-IP")?.let { if (it.isNotBlank()) return it.trim() }
         }
-        request.getHeader("X-Real-IP")?.let { if (it.isNotBlank()) return it.trim() }
         return request.remoteAddr
     }
 

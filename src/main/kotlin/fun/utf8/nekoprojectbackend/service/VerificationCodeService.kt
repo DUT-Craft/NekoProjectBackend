@@ -89,10 +89,9 @@ class VerificationCodeService(
         }
 
         val count = redis.opsForValue().increment(dailyKey) ?: 1L
-        if (count == 1L) {
-            // 当天首次发送：设置过期到当日结束（跨天后自动失效）
-            redis.expire(dailyKey, Duration.ofSeconds(secondsUntilEndOfDay()))
-        }
+        // 每次发送都刷新 TTL 到当日结束（幂等）：避免「increment 成功但 expire 前进程崩溃」
+        // 导致 dailyKey 无 TTL 永驻、该邮箱永久超限。即便多次重设也只是延到当天结束，安全。
+        redis.expire(dailyKey, Duration.ofSeconds(secondsUntilEndOfDay()))
         if (count > props.dailyLimit) {
             throw BusinessException(HttpStatus.TOO_MANY_REQUESTS, "今日验证码发送次数已达上限（${props.dailyLimit} 次）")
         }
