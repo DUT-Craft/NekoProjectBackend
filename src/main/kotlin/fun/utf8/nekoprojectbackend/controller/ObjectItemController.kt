@@ -4,10 +4,12 @@ import `fun`.utf8.nekoprojectbackend.datasource.jdbc.JoinApplicationStatus
 import `fun`.utf8.nekoprojectbackend.datasource.jdbc.ObjectItemCommentStatus
 import `fun`.utf8.nekoprojectbackend.datasource.jdbc.ObjectItemStatus
 import `fun`.utf8.nekoprojectbackend.datasource.jdbc.ObjectItemUpdateStatus
+import `fun`.utf8.nekoprojectbackend.security.LoginUser
 import `fun`.utf8.nekoprojectbackend.service.*
 import `fun`.utf8.nekoprojectbackend.shared.Response
 import `fun`.utf8.nekoprojectbackend.shared.ResponseBuilder
 import org.springframework.http.ResponseEntity
+import org.springframework.security.core.annotation.AuthenticationPrincipal
 import org.springframework.web.bind.annotation.*
 import java.time.LocalDateTime
 
@@ -19,6 +21,8 @@ class ObjectItemController(
     private val objectItemUpdateService: ObjectItemUpdateService,
     private val objectItemCommentService: ObjectItemCommentService,
     private val joinApplicationService: JoinApplicationService,
+    private val accessService: AccessService,
+    private val operationLogService: OperationLogService,
     private val builder: ResponseBuilder,
 ) {
 
@@ -31,6 +35,12 @@ class ObjectItemController(
     @PostMapping
     fun save(@RequestBody request: ObjectItemSaveRequest): ResponseEntity<Response> {
         val item = objectItemService.save(request)
+        operationLogService.record(
+            action = "PROJECT_CREATE",
+            targetType = "PROJECT",
+            targetId = item.id,
+            description = "提交项目《${request.title}》",
+        )
 
         data class Response(
             val id: Int?,
@@ -315,10 +325,18 @@ class ObjectItemController(
 
     @PutMapping("/{id}")
     fun update(
+        @AuthenticationPrincipal user: LoginUser,
         @PathVariable id: Int,
         @RequestBody request: ObjectItemUpdateRequest,
     ): ResponseEntity<Response> {
+        accessService.ensureCanManage(user, id)
         val item = objectItemService.update(id, request)
+        operationLogService.record(
+            action = "PROJECT_UPDATE",
+            targetType = "PROJECT",
+            targetId = id,
+            description = "更新项目 #$id",
+        )
 
         data class Response(
             val id: Int?,
@@ -354,7 +372,11 @@ class ObjectItemController(
     }
 
     @PutMapping("/batch")
-    fun updateBatch(@RequestBody request: ObjectItemBatchUpdateRequest): ResponseEntity<Response> {
+    fun updateBatch(
+        @AuthenticationPrincipal user: LoginUser,
+        @RequestBody request: ObjectItemBatchUpdateRequest,
+    ): ResponseEntity<Response> {
+        request.items.forEach { it.id?.let { id -> accessService.ensureCanManage(user, id) } }
         val items = objectItemService.updateBatch(request.items)
 
         data class Response(
@@ -393,8 +415,18 @@ class ObjectItemController(
     }
 
     @DeleteMapping("/batch")
-    fun deleteBatch(@RequestBody request: ObjectItemBatchDeleteRequest): ResponseEntity<Response> {
+    fun deleteBatch(
+        @AuthenticationPrincipal user: LoginUser,
+        @RequestBody request: ObjectItemBatchDeleteRequest,
+    ): ResponseEntity<Response> {
+        request.ids.forEach { accessService.ensureCanManage(user, it) }
         objectItemService.deleteBatch(request.ids)
+        operationLogService.record(
+            action = "PROJECT_DELETE",
+            targetType = "PROJECT",
+            targetId = request.ids,
+            description = "批量删除项目 ${request.ids}",
+        )
 
         data class Response(
             val deleted: Boolean,

@@ -36,8 +36,10 @@ class DataSeeder(
             log.info("⚠ 跳过模拟数据写入（neko.seed.enabled=false）")
             return
         }
-        if (userRepository.count() > 0) {
-            log.info("⚠ 数据库已有数据，跳过模拟数据写入")
+        // 管理员账户由 AdminUserSeeder 独立初始化（先于本类执行），
+        // 不能再用「用户表非空」判断是否已播种，改为检查首个演示用户是否存在。
+        if (userRepository.findByUsername(DEMO_USERS.first().username) != null) {
+            log.info("⚠ 模拟数据已存在，跳过写入")
             return
         }
 
@@ -52,7 +54,7 @@ class DataSeeder(
     private fun seedInternal() {
         val password = passwordEncoder.encode(DEFAULT_PASSWORD)!!
 
-        val users = DEMO_USERS.map { (username, email, nickname, status) ->
+        val users = DEMO_USERS.map { (username, email, nickname, status, role) ->
             userRepository.save(
                 User(
                     username = username,
@@ -60,6 +62,7 @@ class DataSeeder(
                     email = email,
                     nickname = nickname,
                     status = status,
+                    role = role,
                 )
             )
         }
@@ -79,7 +82,7 @@ class DataSeeder(
         }
 
         // 项目条目（含招募需求与标签）
-        val objectItems = DEMO_OBJECTS.map { def ->
+        val objectItems = DEMO_OBJECTS.mapIndexed { index, def ->
             objectItemRepository.save(
                 ObjectItem().apply {
                     title = def.title
@@ -91,6 +94,7 @@ class DataSeeder(
                     leaderMcId = def.leaderMcId
                     contactInformation = def.contact
                     controlPassword = password
+                    ownerId = users[index % users.size].id
                     tags = def.tags.toMutableList()
                     needMembers = def.needMembers.map { (skill, number, ctx) ->
                         NeedMemberItem().apply {
@@ -149,11 +153,10 @@ class DataSeeder(
         const val DEFAULT_PASSWORD = "nekobox123"
 
         val DEMO_USERS = listOf(
-            SeedUser("admin", "admin@nekobox.local", "管理员", Status.ACTIVE),
-            SeedUser("nyaa", "nyaa@nekobox.local", "Nyaako", Status.ACTIVE),
-            SeedUser("shiro", "shiro@nekobox.local", "Shiro", Status.ACTIVE),
-            SeedUser("kuro", "kuro@nekobox.local", "KuroNeko", Status.ACTIVE),
-            SeedUser("frozen", "frozen@nekobox.local", "Frozen", Status.BANNED),
+            SeedUser("nyaa", "nyaa@nekobox.local", "Nyaako", Status.ACTIVE, Role.PROJECT_MANAGER),
+            SeedUser("shiro", "shiro@nekobox.local", "Shiro", Status.ACTIVE, Role.PROJECT_MANAGER),
+            SeedUser("kuro", "kuro@nekobox.local", "KuroNeko", Status.ACTIVE, Role.PROJECT_MANAGER),
+            SeedUser("frozen", "frozen@nekobox.local", "Frozen", Status.BANNED, Role.PROJECT_MANAGER),
         )
 
         val DEMO_MINDS = listOf(
@@ -226,7 +229,13 @@ class DataSeeder(
         )
     }
 
-    private data class SeedUser(val username: String, val email: String, val nickname: String, val status: Status)
+    private data class SeedUser(
+        val username: String,
+        val email: String,
+        val nickname: String,
+        val status: Status,
+        val role: Role,
+    )
     private data class SeedMind(val title: String, val content: String, val mcId: String, val status: MindStatus)
     private data class SeedNeed(val skill: String, val number: Int, val context: String)
     private data class SeedObject(

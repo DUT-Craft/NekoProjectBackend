@@ -1,12 +1,13 @@
 package `fun`.utf8.nekoprojectbackend.security
 
+import `fun`.utf8.nekoprojectbackend.datasource.jdbc.Role
 import `fun`.utf8.nekoprojectbackend.datasource.jdbc.User
 import org.springframework.security.core.GrantedAuthority
 import org.springframework.security.core.userdetails.UserDetails
-import kotlin.jvm.JvmName
 
 /**
- * JWT 鉴权主体。本项目不使用角色/权限体系，authorities 为空；
+ * JWT 鉴权主体。authorities 为空（不使用 Spring Security 角色体系）；
+ * 账号等级通过 [role] 携带，由 [fun.utf8.nekoprojectbackend.service.AccessService] 软判定。
  * 用户封禁通过 Redis 白名单驱逐（见 TokenStore.invalidateAllSessions）实现，故不再携带 status。
  *
  * 注：UserDetails.getUsername() 与 data class 属性 username 生成的 getter 同签名，
@@ -15,6 +16,7 @@ import kotlin.jvm.JvmName
 data class LoginUser(
     val id: Long,
     @get:JvmName("loginUsername") val username: String,
+    val role: Role,
     val jti: String,
 ) : UserDetails {
 
@@ -27,6 +29,7 @@ data class LoginUser(
     override fun isEnabled(): Boolean = true
 
     companion object {
-        fun of(user: User, jti: String) = LoginUser(user.id!!, user.username, jti)
+        fun of(user: User, jti: String) =
+            LoginUser(user.id!!, user.username, user.role ?: Role.PROJECT_MANAGER, jti)
     }
 }

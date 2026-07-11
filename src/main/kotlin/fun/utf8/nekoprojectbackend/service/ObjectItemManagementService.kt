@@ -156,6 +156,7 @@ class ObjectItemManagementService(
             tags = tags.orEmpty().toList(),
             leaderMcId = leaderMcId,
             contactInformation = contactInformation,
+            ownerId = ownerId,
             hasControlPassword = !controlPassword.isNullOrBlank(),
         )
     }

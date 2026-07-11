@@ -1,21 +1,29 @@
 package `fun`.utf8.nekoprojectbackend.service
 
 import `fun`.utf8.nekoprojectbackend.config.JwtProperties
+import `fun`.utf8.nekoprojectbackend.datasource.jdbc.Role
 import `fun`.utf8.nekoprojectbackend.datasource.jdbc.Status
+import `fun`.utf8.nekoprojectbackend.datasource.jdbc.User
+import `fun`.utf8.nekoprojectbackend.handlder.ParamErrorException
 import `fun`.utf8.nekoprojectbackend.handlder.TokenInvalidException
 import `fun`.utf8.nekoprojectbackend.handlder.UserDisabledException
 import `fun`.utf8.nekoprojectbackend.handlder.UsernameOrPasswordErrorException
+import jakarta.transaction.Transactional
 import org.springframework.security.crypto.password.PasswordEncoder
 import org.springframework.stereotype.Service
 import java.time.Duration
 
-/** 鉴权业务：登录（密码校验 + 签发 token 并写白名单）、登出（白名单驱逐）、刷新令牌（一次性消费）。 */
+/**
+ * 鉴权业务：登录（密码校验 + 签发 token 并写白名单）、登出（白名单驱逐）、
+ * 刷新令牌（一次性消费，刷新时重读用户以同步角色）、项目管理凭邀请码注册。
+ */
 @Service
 class AuthService(
     private val userService: UserService,
     private val passwordEncoder: PasswordEncoder,
     private val jwtService: JwtService,
     private val tokenStore: TokenStore,
+    private val inviteCodeService: InviteCodeService,
     private val props: JwtProperties,
 ) {
 
@@ -28,6 +36,19 @@ class AuthService(
         val refreshExpiresIn: Long,
     )
 
+    data class RegisterManagerRequest(
+        val inviteCode: String,
+        val username: String,
+        val password: String,
+        val email: String,
+    )
+
+    data class RegisterManagerResponse(
+        val id: Long,
+        val username: String,
+        val role: Role,
+    )
+
     fun login(req: LoginRequest): LoginResponse {
         val user = userService.findByUsername(req.username)
             ?: throw UsernameOrPasswordErrorException()
@@ -35,7 +56,7 @@ class AuthService(
         if (!passwordEncoder.matches(req.password, user.password)) {
             throw UsernameOrPasswordErrorException()
         }
-        return issueTokens(user.id!!, user.username)
+        return issueTokens(user)
     }
 
     fun logout(jti: String, userId: Long) {
@@ -52,13 +73,31 @@ class AuthService(
         val storedUserId = tokenStore.consumeRefresh(jti)
             ?: throw TokenInvalidException("刷新令牌已失效")
         if (storedUserId != userId) throw TokenInvalidException()
-        val username = claims.get(CLAIM_USERNAME, String::class.java)
-        return issueTokens(userId, username)
+        // 重新读取用户，确保刷新后 token 内角色与当前一致
+        val user = userService.findById(userId)
+            ?: throw TokenInvalidException("用户不存在")
+        return issueTokens(user)
     }
 
-    private fun issueTokens(userId: Long, username: String): LoginResponse {
-        val access = jwtService.issueAccessToken(userId, username, props.accessTokenTtlSeconds)
-        val refresh = jwtService.issueRefreshToken(userId, username, props.refreshTokenTtlSeconds)
+    /** 项目管理凭一次性邀请码注册：先原子消费邀请码（保证一码一次），再建号。 */
+    @Transactional
+    fun registerManager(req: RegisterManagerRequest): RegisterManagerResponse {
+        if (!inviteCodeService.consume(req.inviteCode)) {
+            throw ParamErrorException("邀请码无效或已过期")
+        }
+        val user = userService.createUser(req.username, req.password, req.email, Role.PROJECT_MANAGER)
+        return RegisterManagerResponse(
+            id = user.id!!,
+            username = user.username,
+            role = user.role ?: Role.PROJECT_MANAGER,
+        )
+    }
+
+    private fun issueTokens(user: User): LoginResponse {
+        val role = (user.role ?: Role.PROJECT_MANAGER).name
+        val userId = user.id!!
+        val access = jwtService.issueAccessToken(userId, user.username, role, props.accessTokenTtlSeconds)
+        val refresh = jwtService.issueRefreshToken(userId, user.username, role, props.refreshTokenTtlSeconds)
         tokenStore.saveAccess(access.jti, userId, Duration.ofSeconds(access.ttlSeconds))
         tokenStore.saveRefresh(refresh.jti, userId, Duration.ofSeconds(refresh.ttlSeconds))
         return LoginResponse(access.token, refresh.token, "Bearer", access.ttlSeconds, refresh.ttlSeconds)
@@ -67,6 +106,5 @@ class AuthService(
     private companion object {
         const val TYPE_REFRESH = "refresh"
         const val CLAIM_TYPE = "type"
-        const val CLAIM_USERNAME = "username"
     }
 }

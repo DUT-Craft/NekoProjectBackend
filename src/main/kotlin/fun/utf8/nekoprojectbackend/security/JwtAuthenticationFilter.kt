@@ -1,5 +1,6 @@
 package `fun`.utf8.nekoprojectbackend.security
 
+import `fun`.utf8.nekoprojectbackend.datasource.jdbc.Role
 import `fun`.utf8.nekoprojectbackend.handlder.TokenExpiredException
 import `fun`.utf8.nekoprojectbackend.handlder.TokenInvalidException
 import `fun`.utf8.nekoprojectbackend.service.JwtService
@@ -56,16 +57,22 @@ class JwtAuthenticationFilter(
         }
     }
 
-    private fun toPrincipal(claims: Claims): LoginUser = LoginUser(
-        id = claims.subject.toLong(),
-        username = claims.get(CLAIM_USERNAME, String::class.java),
-        jti = claims.id,
-    )
+    private fun toPrincipal(claims: Claims): LoginUser {
+        val roleName = claims.get(CLAIM_ROLE, String::class.java)
+        val role = runCatching { roleName?.let { Role.valueOf(it) } }.getOrNull() ?: Role.PROJECT_MANAGER
+        return LoginUser(
+            id = claims.subject.toLong(),
+            username = claims.get(CLAIM_USERNAME, String::class.java),
+            role = role,
+            jti = claims.id,
+        )
+    }
 
     companion object {
         const val AUTH_ERROR_ATTR = "auth.error"
         private const val AUTH_HEADER = "Authorization"
         private const val BEARER_PREFIX = "Bearer "
         private const val CLAIM_USERNAME = "username"
+        private const val CLAIM_ROLE = "role"
     }
 }

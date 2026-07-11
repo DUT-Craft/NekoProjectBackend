@@ -11,11 +11,10 @@ import io.jsonwebtoken.security.Keys
 import org.springframework.stereotype.Service
 import java.nio.charset.StandardCharsets
 import java.time.Instant
-import java.util.Date
-import java.util.UUID
+import java.util.*
 import javax.crypto.SecretKey
 
-/** JWT 签发与解析（jjwt）：生成 access/refresh token，解析时校验签名与过期并映射为业务异常。 */
+/** JWT 签发与解析（jjwt）：生成 access/refresh token（携带账号等级），解析时校验签名与过期并映射为业务异常。 */
 @Service
 class JwtService(props: JwtProperties) {
 
@@ -23,13 +22,13 @@ class JwtService(props: JwtProperties) {
         Keys.hmacShaKeyFor(props.secret.toByteArray(StandardCharsets.UTF_8))
     private val issuer: String = props.issuer
 
-    fun issueAccessToken(userId: Long, username: String, ttlSeconds: Long): IssuedToken =
-        issue(userId, username, TYPE_ACCESS, ttlSeconds)
+    fun issueAccessToken(userId: Long, username: String, role: String, ttlSeconds: Long): IssuedToken =
+        issue(userId, username, role, TYPE_ACCESS, ttlSeconds)
 
-    fun issueRefreshToken(userId: Long, username: String, ttlSeconds: Long): IssuedToken =
-        issue(userId, username, TYPE_REFRESH, ttlSeconds)
+    fun issueRefreshToken(userId: Long, username: String, role: String, ttlSeconds: Long): IssuedToken =
+        issue(userId, username, role, TYPE_REFRESH, ttlSeconds)
 
-    private fun issue(userId: Long, username: String, type: String, ttlSeconds: Long): IssuedToken {
+    private fun issue(userId: Long, username: String, role: String, type: String, ttlSeconds: Long): IssuedToken {
         val jti = UUID.randomUUID().toString()
         val now = Instant.now()
         val token = Jwts.builder()
@@ -37,6 +36,7 @@ class JwtService(props: JwtProperties) {
             .issuer(issuer)
             .subject(userId.toString())
             .claim(CLAIM_USERNAME, username)
+            .claim(CLAIM_ROLE, role)
             .claim(CLAIM_TYPE, type)
             .issuedAt(Date.from(now))
             .expiration(Date.from(now.plusSeconds(ttlSeconds)))
@@ -67,6 +67,7 @@ class JwtService(props: JwtProperties) {
         const val TYPE_ACCESS = "access"
         const val TYPE_REFRESH = "refresh"
         const val CLAIM_USERNAME = "username"
+        const val CLAIM_ROLE = "role"
         const val CLAIM_TYPE = "type"
     }
 }

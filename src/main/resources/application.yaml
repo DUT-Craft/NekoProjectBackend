@@ -26,6 +26,21 @@ neko:
   file:
     storage-path: ${FILE_STORAGE_PATH:./storage}
     base-url: ${FILE_BASE_URL:http://localhost:8080}
+  admin:
+    username: ${ADMIN_USERNAME:admin}
+    password: ${ADMIN_PASSWORD:password}
+    email: ${ADMIN_EMAIL:admin@nekobox.local}
+  invite:
+    ttl-seconds: ${INVITE_TTL_SECONDS:604800}
+  project:
+    max-per-manager: ${PROJECT_MAX_PER_MANAGER:10}
+  audit:
+    enabled: ${AUDIT_ENABLED:true}
+    log-path: ${AUDIT_LOG_PATH:./logs/operation.log}
+    max-size-mb: ${AUDIT_MAX_SIZE_MB:50}
+    max-archives: ${AUDIT_MAX_ARCHIVES:30}
+  seed:
+    enabled: ${SEED_ENABLED:true}
 
 management:
   endpoint:

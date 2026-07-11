@@ -61,6 +61,10 @@ class ObjectItem {
 
     @Column(name = "control_password", length = 255)
     var controlPassword: String? = null
+
+    /** 归属项目管理的用户 ID（users.id）；为空表示未分配，仅总管理可维护。 */
+    @Column(name = "owner_id")
+    var ownerId: Long? = null
 }
 
 /** 招募需求项：岗位技能、人数、说明（嵌入项目条目集合表）。 */

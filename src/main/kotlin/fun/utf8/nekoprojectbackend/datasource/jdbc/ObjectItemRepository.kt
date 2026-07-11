@@ -15,4 +15,8 @@ interface ObjectItemRepository : JpaRepository<ObjectItem, Int> {
     fun findByLeaderMcId(leaderMcId: String): List<ObjectItem>
 
     fun findByTitleContainingIgnoreCase(title: String): List<ObjectItem>
+
+    fun countByOwnerId(ownerId: Long): Long
+
+    fun findByOwnerId(ownerId: Long): List<ObjectItem>
 }

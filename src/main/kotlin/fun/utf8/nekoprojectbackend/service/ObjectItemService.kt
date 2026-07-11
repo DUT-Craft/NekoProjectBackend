@@ -1,11 +1,9 @@
 package `fun`.utf8.nekoprojectbackend.service
 
-import `fun`.utf8.nekoprojectbackend.datasource.jdbc.NeedMemberItem
-import `fun`.utf8.nekoprojectbackend.datasource.jdbc.ObjectItem
-import `fun`.utf8.nekoprojectbackend.datasource.jdbc.ObjectItemRepository
-import `fun`.utf8.nekoprojectbackend.datasource.jdbc.ObjectItemStatus
+import `fun`.utf8.nekoprojectbackend.datasource.jdbc.*
 import `fun`.utf8.nekoprojectbackend.handlder.ParamErrorException
 import `fun`.utf8.nekoprojectbackend.handlder.ResourceNotFoundException
+import org.springframework.beans.factory.annotation.Value
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
 import java.util.*
@@ -72,6 +70,7 @@ data class ObjectItemQueryRequest(
     val leader: String? = null,
     val leaderMcId: String? = null,
     val tags: List<String>? = null,
+    val ownerId: Long? = null,
 )
 
 data class ObjectItemResponse(
@@ -86,6 +85,7 @@ data class ObjectItemResponse(
     val tags: List<String>,
     val leaderMcId: String?,
     val contactInformation: String?,
+    val ownerId: Long?,
     val hasControlPassword: Boolean,
 )
 
@@ -122,6 +122,8 @@ enum class SortDirection {
 @Service
 class ObjectItemService(
     private val objectItemRepository: ObjectItemRepository,
+    private val userRepository: UserRepository,
+    @Value("\${neko.project.max-per-manager:10}") private val maxPerManager: Long,
 ) {
 
     @Transactional
@@ -216,6 +218,7 @@ class ObjectItemService(
                 ) == true
             }
             .filter { normalizedTags.isEmpty() || it.containsAllTags(normalizedTags) }
+            .filter { request.ownerId == null || it.ownerId == request.ownerId }
             .toList()
     }
 
@@ -297,6 +300,26 @@ class ObjectItemService(
         validateBatchSize(ids, "批量删除项目条目不能为空")
         val deleteRequests = ids.map { ObjectItemUpdateRequest(id = it, status = ObjectItemStatus.DELETED) }
         updateBatch(deleteRequests)
+    }
+
+    /** 总管理把项目分配给项目管理（ownerId=null 表示收回为未分配）。校验目标角色与名下项目上限。 */
+    @Transactional
+    fun assignOwner(id: Int, ownerId: Long?): ObjectItemResponse {
+        val item = findObjectItem(id)
+        if (ownerId != null) {
+            val manager = userRepository.findById(ownerId)
+                .orElseThrow { ResourceNotFoundException("用户不存在") }
+            if (manager.role != Role.PROJECT_MANAGER) {
+                throw ParamErrorException("目标用户不是项目管理")
+            }
+            // 重新分配给同一人不重复计入上限
+            val alreadyOwned = item.ownerId == ownerId
+            if (!alreadyOwned && objectItemRepository.countByOwnerId(ownerId) >= maxPerManager) {
+                throw ParamErrorException("该项目管理名下项目已达上限 $maxPerManager")
+            }
+        }
+        item.ownerId = ownerId
+        return objectItemRepository.save(item).toResponse()
     }
 
     private fun ObjectItemSaveRequest.toEntity(): ObjectItem {
@@ -486,6 +509,7 @@ class ObjectItemService(
             tags = tags.orEmpty().toList(),
             leaderMcId = leaderMcId,
             contactInformation = contactInformation,
+            ownerId = ownerId,
             hasControlPassword = !controlPassword.isNullOrBlank(),
         )
     }

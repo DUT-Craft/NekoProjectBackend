@@ -1,5 +1,6 @@
 package `fun`.utf8.nekoprojectbackend.service
 
+import `fun`.utf8.nekoprojectbackend.datasource.jdbc.Role
 import `fun`.utf8.nekoprojectbackend.datasource.jdbc.Status
 import `fun`.utf8.nekoprojectbackend.datasource.jdbc.User
 import `fun`.utf8.nekoprojectbackend.datasource.jdbc.UserRepository
@@ -23,6 +24,10 @@ class UserService(
         return userRepository.findByEmail(email)
     }
 
+    fun findByRole(role: Role): List<User> {
+        return userRepository.findByRole(role)
+    }
+
     fun save(user: User): User {
         return userRepository.save(user)
     }
@@ -32,7 +37,12 @@ class UserService(
     }
 
     @Transactional
-    fun createUser(username: String, password: String, email: String): User {
+    fun createUser(
+        username: String,
+        password: String,
+        email: String,
+        role: Role = Role.PROJECT_MANAGER,
+    ): User {
         val normalizedUsername = username.trim()
         val normalizedEmail = email.trim()
 
@@ -51,6 +61,7 @@ class UserService(
                 email = normalizedEmail,
                 nickname = normalizedUsername,
                 status = Status.ACTIVE,
+                role = role,
             )
         )
     }

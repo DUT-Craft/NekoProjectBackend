@@ -1,10 +1,12 @@
 package `fun`.utf8.nekoprojectbackend.controller
 
 import `fun`.utf8.nekoprojectbackend.datasource.jdbc.MindStatus
+import `fun`.utf8.nekoprojectbackend.security.LoginUser
 import `fun`.utf8.nekoprojectbackend.service.*
 import `fun`.utf8.nekoprojectbackend.shared.Response
 import `fun`.utf8.nekoprojectbackend.shared.ResponseBuilder
 import org.springframework.http.ResponseEntity
+import org.springframework.security.core.annotation.AuthenticationPrincipal
 import org.springframework.web.bind.annotation.*
 import java.time.LocalDateTime
 
@@ -13,6 +15,7 @@ import java.time.LocalDateTime
 @RequestMapping("/api/project/minds")
 class MindController(
     private val mindService: MindService,
+    private val accessService: AccessService,
     private val builder: ResponseBuilder,
 ) {
 
@@ -284,9 +287,11 @@ class MindController(
 
     @PutMapping("/{id}")
     fun update(
+        @AuthenticationPrincipal admin: LoginUser,
         @PathVariable id: Int,
         @RequestBody request: MindUpdateRequest,
     ): ResponseEntity<Response> {
+        accessService.requireSuperAdmin(admin)
         val mind = mindService.update(id, request)
 
         data class Response(
@@ -315,7 +320,11 @@ class MindController(
     }
 
     @PutMapping("/batch")
-    fun updateBatch(@RequestBody request: MindBatchUpdateRequest): ResponseEntity<Response> {
+    fun updateBatch(
+        @AuthenticationPrincipal admin: LoginUser,
+        @RequestBody request: MindBatchUpdateRequest,
+    ): ResponseEntity<Response> {
+        accessService.requireSuperAdmin(admin)
         val minds = mindService.updateBatch(request.items)
 
         data class Response(
@@ -346,7 +355,11 @@ class MindController(
     }
 
     @DeleteMapping("/{id}")
-    fun delete(@PathVariable id: Int): ResponseEntity<Response> {
+    fun delete(
+        @AuthenticationPrincipal admin: LoginUser,
+        @PathVariable id: Int,
+    ): ResponseEntity<Response> {
+        accessService.requireSuperAdmin(admin)
         mindService.delete(id)
 
         data class Response(
@@ -363,7 +376,11 @@ class MindController(
     }
 
     @DeleteMapping("/batch")
-    fun deleteBatch(@RequestBody request: MindBatchDeleteRequest): ResponseEntity<Response> {
+    fun deleteBatch(
+        @AuthenticationPrincipal admin: LoginUser,
+        @RequestBody request: MindBatchDeleteRequest,
+    ): ResponseEntity<Response> {
+        accessService.requireSuperAdmin(admin)
         mindService.deleteBatch(request.ids)
 
         data class Response(
