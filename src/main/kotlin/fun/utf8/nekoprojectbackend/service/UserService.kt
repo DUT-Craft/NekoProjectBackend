@@ -28,6 +28,14 @@ class UserService(
         return userRepository.findByRole(role)
     }
 
+    /** 批量取用户名（供邀请码历史等场景把用户 ID 解析为可读名称）。 */
+    fun namesByIds(ids: Collection<Long>): Map<Long, String> {
+        if (ids.isEmpty()) {
+            return emptyMap()
+        }
+        return userRepository.findAllById(ids).associate { it.id!! to it.username }
+    }
+
     fun save(user: User): User {
         return userRepository.save(user)
     }

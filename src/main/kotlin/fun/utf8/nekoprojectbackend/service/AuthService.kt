@@ -79,13 +79,14 @@ class AuthService(
         return issueTokens(user)
     }
 
-    /** 项目管理凭一次性邀请码注册：先原子消费邀请码（保证一码一次），再建号。 */
+    /** 项目管理凭一次性邀请码注册：先建号，再原子消费邀请码（一码一次）；消费失败则回滚刚创建的用户。 */
     @Transactional
     fun registerManager(req: RegisterManagerRequest): RegisterManagerResponse {
-        if (!inviteCodeService.consume(req.inviteCode)) {
+        val user = userService.createUser(req.username, req.password, req.email, Role.PROJECT_MANAGER)
+        if (!inviteCodeService.consume(req.inviteCode, user.id!!)) {
+            // 邀请码无效 / 已用 / 已过期：同一事务回滚，不留下无邀请码的用户
             throw ParamErrorException("邀请码无效或已过期")
         }
-        val user = userService.createUser(req.username, req.password, req.email, Role.PROJECT_MANAGER)
         return RegisterManagerResponse(
             id = user.id!!,
             username = user.username,
