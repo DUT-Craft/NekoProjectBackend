@@ -20,16 +20,21 @@ import org.springframework.web.cors.UrlBasedCorsConfigurationSource
  * Spring Security 配置：无状态 JWT。
  *
  * 鉴权分级（authorizeHttpRequests 按声明顺序首匹配）：
- *  - 登录 / 刷新：不要求 JWT（refresh 走 HttpOnly Cookie）
+ *  - 登录 / 刷新 / 注册 / 邮箱验证码 / 找回密码 / 邮箱验证登录：不要求 JWT（匿名流程）
  *  - 公开查询 GET（项目 / 想法列表、详情、计数、子资源）：匿名可访问
  *  - 公开投稿 POST（新项目 / 想法 / 评论 / 加入申请）：匿名提交，后端固定 PENDING 待审
  *  - 项目方自服务（admin/project 下）：凭 controlPassword 鉴权，非 JWT，由 service 层校验
  *  - 文件读取 GET（/api/files 路径）：匿名可读，私有/文档下载由 FileService 二次鉴权
- *  - 其余（管理端 admin/object-items、admin/minds，以及 auth/logout、auth/me，
+ *  - 其余（管理端 admin/object-items、admin/minds，auth/logout、auth/me、auth/change-password，
  *    还有 project 下的写入 PUT/DELETE/batch，以及文件上传/删除 POST/DELETE）均需 JWT
  */
 @Configuration
-@EnableConfigurationProperties(JwtProperties::class, TokenCookieProperties::class, FileProperties::class)
+@EnableConfigurationProperties(
+    JwtProperties::class,
+    TokenCookieProperties::class,
+    FileProperties::class,
+    MailProperties::class
+)
 class SecurityConfig(
     private val jwtFilter: JwtAuthenticationFilter,
     private val authEntryPoint: JsonAuthEntryPoint,
@@ -43,9 +48,17 @@ class SecurityConfig(
             .cors(Customizer.withDefaults())
             .sessionManagement { it.sessionCreationPolicy(SessionCreationPolicy.STATELESS) }
             .authorizeHttpRequests {
-                // 登录 / 刷新 / 项目管理注册：不要求 JWT（刷新令牌走 HttpOnly Cookie，注册走一次性邀请码）
-                it.requestMatchers("/api/auth/login", "/api/auth/refresh", "/api/auth/register/manager", "/error")
-                    .permitAll()
+                // 登录 / 刷新 / 注册 / 邮箱验证码 / 找回密码 / 邮箱验证登录：不要求 JWT
+                // （刷新令牌走 HttpOnly Cookie，注册走一次性邀请码+邮箱验证码，验证码/找回/邮箱登录为匿名流程）
+                it.requestMatchers(
+                    "/api/auth/login",
+                    "/api/auth/login/email",
+                    "/api/auth/refresh",
+                    "/api/auth/register/manager",
+                    "/api/auth/verification-code",
+                    "/api/auth/reset-password",
+                    "/error",
+                ).permitAll()
                 // 公开查询（GET）：项目 / 想法的列表、详情、计数、动态、评论，匿名可访问
                 it.requestMatchers(HttpMethod.GET, "/api/project/**").permitAll()
                 // 公开投稿（POST）：新项目 / 想法 / 评论 / 加入申请，匿名提交（后端固定 PENDING 待审）

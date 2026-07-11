@@ -21,6 +21,8 @@ neko:
     verification:
       ttl-seconds: ${MAIL_VERIFICATION_TTL_SECONDS:600}
       code-length: ${MAIL_VERIFICATION_CODE_LENGTH:6}
+      send-interval-seconds: ${MAIL_VERIFICATION_SEND_INTERVAL:60}
+      daily-limit: ${MAIL_VERIFICATION_DAILY_LIMIT:10}
       from: ${MAIL_FROM:${MAIL_USERNAME:}}
       subject-prefix: ${MAIL_VERIFICATION_SUBJECT_PREFIX:NekoBackend}
   file:
