@@ -26,6 +26,14 @@ neko:
   file:
     storage-path: ${FILE_STORAGE_PATH:./storage}
     base-url: ${FILE_BASE_URL:http://localhost:8080}
+    image:
+      allowed-extensions: ${FILE_IMAGE_ALLOWED_EXT:jpg,jpeg,png,gif,webp,bmp,svg}
+      max-size-mb: ${FILE_IMAGE_MAX_MB:10}
+    document:
+      allowed-extensions: ${FILE_DOC_ALLOWED_EXT:pdf,doc,docx,xls,xlsx,ppt,pptx,txt,md,csv,zip}
+      max-size-mb: ${FILE_DOC_MAX_MB:20}
+    public-read-image: ${FILE_PUBLIC_READ_IMAGE:true}
+    download-token-ttl-seconds: ${FILE_DOWNLOAD_TOKEN_TTL:300}
   admin:
     username: ${ADMIN_USERNAME:admin}
     password: ${ADMIN_PASSWORD:password}

@@ -59,6 +59,10 @@ class ObjectItem {
     @Column(name = "contact_information", length = 255)
     var contactInformation: String? = null
 
+    /** 项目封面/介绍配图地址（由文件上传接口返回的 url）。 */
+    @Column(name = "cover_image_url", length = 512)
+    var coverImageUrl: String? = null
+
     @Column(name = "control_password", length = 255)
     var controlPassword: String? = null
 

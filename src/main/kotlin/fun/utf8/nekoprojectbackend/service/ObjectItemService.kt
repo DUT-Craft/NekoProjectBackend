@@ -31,6 +31,7 @@ data class ObjectItemSaveRequest(
     val tags: List<String>? = null,
     val leaderMcId: String? = null,
     val contactInformation: String? = null,
+    val coverImageUrl: String? = null,
     val controlPassword: String? = null,
 )
 
@@ -50,6 +51,7 @@ data class ObjectItemUpdateRequest(
     val tags: List<String>? = null,
     val leaderMcId: String? = null,
     val contactInformation: String? = null,
+    val coverImageUrl: String? = null,
     val controlPassword: String? = null,
 )
 
@@ -85,6 +87,7 @@ data class ObjectItemResponse(
     val tags: List<String>,
     val leaderMcId: String?,
     val contactInformation: String?,
+    val coverImageUrl: String?,
     val ownerId: Long?,
     val hasControlPassword: Boolean,
 )
@@ -347,6 +350,11 @@ class ObjectItemService(
                 MAX_CONTACT_INFORMATION_LENGTH,
                 "联系方式不能超过 $MAX_CONTACT_INFORMATION_LENGTH 个字符",
             )
+            it.coverImageUrl = normalizeNullableText(
+                coverImageUrl,
+                MAX_COVER_IMAGE_URL_LENGTH,
+                "封面图地址不能超过 $MAX_COVER_IMAGE_URL_LENGTH 个字符",
+            )
             it.controlPassword = normalizeNullableText(
                 controlPassword,
                 MAX_CONTROL_PASSWORD_LENGTH,
@@ -385,6 +393,13 @@ class ObjectItemService(
                 it,
                 MAX_CONTACT_INFORMATION_LENGTH,
                 "联系方式不能超过 $MAX_CONTACT_INFORMATION_LENGTH 个字符"
+            )
+        }
+        request.coverImageUrl?.let {
+            coverImageUrl = normalizeNullableText(
+                it,
+                MAX_COVER_IMAGE_URL_LENGTH,
+                "封面图地址不能超过 $MAX_COVER_IMAGE_URL_LENGTH 个字符"
             )
         }
         request.controlPassword?.let {
@@ -509,6 +524,7 @@ class ObjectItemService(
             tags = tags.orEmpty().toList(),
             leaderMcId = leaderMcId,
             contactInformation = contactInformation,
+            coverImageUrl = coverImageUrl,
             ownerId = ownerId,
             hasControlPassword = !controlPassword.isNullOrBlank(),
         )
@@ -533,6 +549,7 @@ class ObjectItemService(
         private const val MAX_NEED_MEMBER_CONTEXT_LENGTH = 255
         private const val MAX_LEADER_MC_ID_LENGTH = 64
         private const val MAX_CONTACT_INFORMATION_LENGTH = 255
+        private const val MAX_COVER_IMAGE_URL_LENGTH = 512
         private const val MAX_CONTROL_PASSWORD_LENGTH = 255
         private const val MAX_TAG_LENGTH = 32
         private const val MAX_PAGE_SIZE = 1024

@@ -24,11 +24,12 @@ import org.springframework.web.cors.UrlBasedCorsConfigurationSource
  *  - 公开查询 GET（项目 / 想法列表、详情、计数、子资源）：匿名可访问
  *  - 公开投稿 POST（新项目 / 想法 / 评论 / 加入申请）：匿名提交，后端固定 PENDING 待审
  *  - 项目方自服务（admin/project 下）：凭 controlPassword 鉴权，非 JWT，由 service 层校验
+ *  - 文件读取 GET（/api/files 路径）：匿名可读，私有/文档下载由 FileService 二次鉴权
  *  - 其余（管理端 admin/object-items、admin/minds，以及 auth/logout、auth/me，
- *    还有 project 下的写入 PUT/DELETE/batch）均需 JWT
+ *    还有 project 下的写入 PUT/DELETE/batch，以及文件上传/删除 POST/DELETE）均需 JWT
  */
 @Configuration
-@EnableConfigurationProperties(JwtProperties::class, TokenCookieProperties::class)
+@EnableConfigurationProperties(JwtProperties::class, TokenCookieProperties::class, FileProperties::class)
 class SecurityConfig(
     private val jwtFilter: JwtAuthenticationFilter,
     private val authEntryPoint: JsonAuthEntryPoint,
@@ -57,6 +58,10 @@ class SecurityConfig(
                 ).permitAll()
                 // 项目方自服务：凭 controlPassword 鉴权（非 JWT），安全层放行，由 service 层校验密码
                 it.requestMatchers("/api/admin/project/**").permitAll()
+                // 文件读取（GET）：mine 列表需登录（含用户维度数据）；其余匿名可读图片预览，
+                // 私有/文档下载由 FileService 二次鉴权。mine 必须声明在 /api/files 通用放行之前（首匹配）。
+                it.requestMatchers(HttpMethod.GET, "/api/files/mine").authenticated()
+                it.requestMatchers(HttpMethod.GET, "/api/files/**").permitAll()
                 it.requestMatchers("/actuator/health", "/actuator/info").permitAll()
                 // 其余接口需 JWT：管理端 /api/admin/object-items、/api/admin/minds、/api/auth/logout、/api/auth/me，
                 // 以及 /api/project/** 下的写入（PUT/DELETE/batch）——这些由登录管理员携带 token 调用

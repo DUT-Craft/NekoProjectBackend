@@ -54,6 +54,7 @@ class ObjectItemController(
             val tags: List<String>,
             val leaderMcId: String?,
             val contactInformation: String?,
+            val coverImageUrl: String?,
             val hasControlPassword: Boolean,
         )
 
@@ -69,6 +70,7 @@ class ObjectItemController(
             tags = item.tags,
             leaderMcId = item.leaderMcId,
             contactInformation = item.contactInformation,
+            coverImageUrl = item.coverImageUrl,
             hasControlPassword = item.hasControlPassword,
         )
 
@@ -91,6 +93,7 @@ class ObjectItemController(
             val tags: List<String>,
             val leaderMcId: String?,
             val contactInformation: String?,
+            val coverImageUrl: String?,
             val hasControlPassword: Boolean,
         )
 
@@ -107,6 +110,7 @@ class ObjectItemController(
                 tags = it.tags,
                 leaderMcId = it.leaderMcId,
                 contactInformation = it.contactInformation,
+                coverImageUrl = it.coverImageUrl,
                 hasControlPassword = it.hasControlPassword,
             )
         }
@@ -130,6 +134,7 @@ class ObjectItemController(
             val tags: List<String>,
             val leaderMcId: String?,
             val contactInformation: String?,
+            val coverImageUrl: String?,
             val hasControlPassword: Boolean,
         )
 
@@ -145,6 +150,7 @@ class ObjectItemController(
             tags = item.tags,
             leaderMcId = item.leaderMcId,
             contactInformation = item.contactInformation,
+            coverImageUrl = item.coverImageUrl,
             hasControlPassword = item.hasControlPassword,
         )
 
@@ -167,6 +173,7 @@ class ObjectItemController(
             val tags: List<String>,
             val leaderMcId: String?,
             val contactInformation: String?,
+            val coverImageUrl: String?,
             val hasControlPassword: Boolean,
         )
 
@@ -183,6 +190,7 @@ class ObjectItemController(
                 tags = it.tags,
                 leaderMcId = it.leaderMcId,
                 contactInformation = it.contactInformation,
+                coverImageUrl = it.coverImageUrl,
                 hasControlPassword = it.hasControlPassword,
             )
         }
@@ -227,6 +235,7 @@ class ObjectItemController(
             val tags: List<String>,
             val leaderMcId: String?,
             val contactInformation: String?,
+            val coverImageUrl: String?,
             val hasControlPassword: Boolean,
         )
 
@@ -254,6 +263,7 @@ class ObjectItemController(
                         tags = it.tags,
                         leaderMcId = it.leaderMcId,
                         contactInformation = it.contactInformation,
+                        coverImageUrl = it.coverImageUrl,
                         hasControlPassword = it.hasControlPassword,
                     )
                 },
@@ -276,6 +286,7 @@ class ObjectItemController(
                     tags = it.tags,
                     leaderMcId = it.leaderMcId,
                     contactInformation = it.contactInformation,
+                    coverImageUrl = it.coverImageUrl,
                     hasControlPassword = it.hasControlPassword,
                 )
             }
@@ -300,6 +311,7 @@ class ObjectItemController(
             val tags: List<String>,
             val leaderMcId: String?,
             val contactInformation: String?,
+            val coverImageUrl: String?,
             val hasControlPassword: Boolean,
         )
 
@@ -316,6 +328,7 @@ class ObjectItemController(
                 tags = it.tags,
                 leaderMcId = it.leaderMcId,
                 contactInformation = it.contactInformation,
+                coverImageUrl = it.coverImageUrl,
                 hasControlPassword = it.hasControlPassword,
             )
         }
@@ -350,6 +363,7 @@ class ObjectItemController(
             val tags: List<String>,
             val leaderMcId: String?,
             val contactInformation: String?,
+            val coverImageUrl: String?,
             val hasControlPassword: Boolean,
         )
 
@@ -365,6 +379,7 @@ class ObjectItemController(
             tags = item.tags,
             leaderMcId = item.leaderMcId,
             contactInformation = item.contactInformation,
+            coverImageUrl = item.coverImageUrl,
             hasControlPassword = item.hasControlPassword,
         )
 
@@ -391,6 +406,7 @@ class ObjectItemController(
             val tags: List<String>,
             val leaderMcId: String?,
             val contactInformation: String?,
+            val coverImageUrl: String?,
             val hasControlPassword: Boolean,
         )
 
@@ -407,6 +423,7 @@ class ObjectItemController(
                 tags = it.tags,
                 leaderMcId = it.leaderMcId,
                 contactInformation = it.contactInformation,
+                coverImageUrl = it.coverImageUrl,
                 hasControlPassword = it.hasControlPassword,
             )
         }
