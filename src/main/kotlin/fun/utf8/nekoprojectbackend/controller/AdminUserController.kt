@@ -72,20 +72,26 @@ class AdminUserController(
         return builder.ok().data(rs).build()
     }
 
-    /** 总管理分配项目时下拉用：返回全部项目管理账号（仅 id / 用户名 / 昵称）。仅总管理可调用。 */
+    /** 总管理分配项目时下拉用：返回可归属项目的全部账号（项目管理 + 总管理，含角色标签）。仅总管理可调用。 */
     @GetMapping("/managers")
     fun listManagers(@AuthenticationPrincipal admin: LoginUser): ResponseEntity<Response> {
         accessService.requireSuperAdmin(admin)
-        val managers = userService.findByRole(Role.PROJECT_MANAGER)
+        val owners = userService.findAssignableOwners()
 
         data class ManagerSummary(
             val id: Long,
             val username: String,
             val nickname: String,
+            val role: Role,
         )
 
-        val rs = managers.map {
-            ManagerSummary(id = it.id!!, username = it.username, nickname = it.nickname)
+        val rs = owners.map {
+            ManagerSummary(
+                id = it.id!!,
+                username = it.username,
+                nickname = it.nickname,
+                role = it.role ?: Role.PROJECT_MANAGER,
+            )
         }
         return builder.ok().data(rs).build()
     }

@@ -43,13 +43,19 @@ class FileController(
         return builder.ok().data(result).build()
     }
 
-    /** 下载/预览：inline=true 预览(图片)，默认下载(attachment)。 */
-    @GetMapping("/{storedName:.+}")
+    /**
+     * 下载/预览：inline=true 预览(图片)，默认下载(attachment)。
+     * storedName 含日期子目录（如 2026/07/11/uuid.png），用 catch-all 路径变量 {*path}
+     * 捕获整段（含斜杠）再去掉前导斜杠还原存储名；单段变量 {storedName} 无法跨 / 匹配会 404。
+     * /mine 是精确字面量映射，优先级高于 catch-all，不受影响。
+     */
+    @GetMapping("/{*path}")
     fun download(
-        @PathVariable storedName: String,
+        @PathVariable path: String,
         @RequestParam(required = false, defaultValue = "false") inline: Boolean,
         @AuthenticationPrincipal user: LoginUser?,
     ): ResponseEntity<InputStreamResource> {
+        val storedName = path.trimStart('/')
         val (record, stream) = fileService.loadForDownload(storedName, user)
         // SVG 可内嵌 <script>：浏览器以 image/svg+xml 内联渲染时会执行脚本，构成同源存储型 XSS
         // （可窃取 JS 可读的 access token）。对 SVG 强制下载，并加 CSP 纵深防御；
@@ -127,11 +133,12 @@ class FileController(
         return sb.toString()
     }
 
-    @DeleteMapping("/{storedName:.+}")
+    @DeleteMapping("/{*path}")
     fun delete(
-        @PathVariable storedName: String,
+        @PathVariable path: String,
         @AuthenticationPrincipal user: LoginUser,
     ): ResponseEntity<Response> {
+        val storedName = path.trimStart('/')
         fileService.delete(storedName, user)
         return builder.ok().build()
     }

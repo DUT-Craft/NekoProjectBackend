@@ -25,7 +25,9 @@ data class ObjectItemSaveRequest(
     val type: String = "",
     val introduction: String? = null,
     val description: String? = null,
-    var status: ObjectItemStatus? = ObjectItemStatus.PENDING,
+    // 未指定时为 null：公开投稿由 toEntity() 固化为 PENDING；管理员创建时由 controller 按角色兜底
+    // （总管理默认 RECRUITING、项目管理强制 PENDING）。
+    var status: ObjectItemStatus? = null,
     val leader: String? = null,
     val needMembers: List<NeedMemberItemRequest>? = null,
     val tags: List<String>? = null,
@@ -305,24 +307,39 @@ class ObjectItemService(
         updateBatch(deleteRequests)
     }
 
-    /** 总管理把项目分配给项目管理（ownerId=null 表示收回为未分配）。校验目标角色与名下项目上限。 */
+    /**
+     * 总管理把项目分配给某个账号（ownerId=null 表示收回为未分配）。
+     * 项目管理与总管理均可被指定为归属人（总管理也可拥有并管理自有项目），仅校验账号存在与名下上限。
+     */
     @Transactional
     fun assignOwner(id: Int, ownerId: Long?): ObjectItemResponse {
         val item = findObjectItem(id)
         if (ownerId != null) {
-            val manager = userRepository.findById(ownerId)
+            userRepository.findById(ownerId)
                 .orElseThrow { ResourceNotFoundException("用户不存在") }
-            if (manager.role != Role.PROJECT_MANAGER) {
-                throw ParamErrorException("目标用户不是项目管理")
-            }
             // 重新分配给同一人不重复计入上限
             val alreadyOwned = item.ownerId == ownerId
             if (!alreadyOwned && objectItemRepository.countByOwnerId(ownerId) >= maxPerManager) {
-                throw ParamErrorException("该项目管理名下项目已达上限 $maxPerManager")
+                throw ParamErrorException("该用户名下项目已达上限 $maxPerManager")
             }
         }
         item.ownerId = ownerId
         return objectItemRepository.save(item).toResponse()
+    }
+
+    /**
+     * 管理员直接创建并归属到自己的项目：总管理可指定状态（绕过审核，默认 RECRUITING 上线），
+     * 项目管理强制 PENDING 等待总管理审核。创建即归属，受名下项目上限约束。
+     */
+    @Transactional
+    fun saveOwned(request: ObjectItemSaveRequest, ownerId: Long, status: ObjectItemStatus): ObjectItemResponse {
+        if (objectItemRepository.countByOwnerId(ownerId) >= maxPerManager) {
+            throw ParamErrorException("名下项目已达上限 $maxPerManager")
+        }
+        val entity = request.toEntity()
+        entity.status = status
+        entity.ownerId = ownerId
+        return objectItemRepository.save(entity).toResponse()
     }
 
     private fun ObjectItemSaveRequest.toEntity(): ObjectItem {

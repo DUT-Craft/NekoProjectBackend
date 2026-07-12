@@ -28,6 +28,11 @@ class UserService(
         return userRepository.findByRole(role)
     }
 
+    /** 可归属项目的全部账号：项目管理 + 总管理（总管理也可创建并管理自有项目）。 */
+    fun findAssignableOwners(): List<User> {
+        return userRepository.findByRoleIn(listOf(Role.PROJECT_MANAGER, Role.SUPER_ADMIN))
+    }
+
     /** 批量取用户名（供邀请码历史等场景把用户 ID 解析为可读名称）。 */
     fun namesByIds(ids: Collection<Long>): Map<Long, String> {
         if (ids.isEmpty()) {
