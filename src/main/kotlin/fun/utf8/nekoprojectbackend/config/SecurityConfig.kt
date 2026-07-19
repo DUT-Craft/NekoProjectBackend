@@ -33,7 +33,8 @@ import org.springframework.web.cors.UrlBasedCorsConfigurationSource
     JwtProperties::class,
     TokenCookieProperties::class,
     FileProperties::class,
-    MailProperties::class
+    MailProperties::class,
+    ModerationProperties::class
 )
 class SecurityConfig(
     private val jwtFilter: JwtAuthenticationFilter,

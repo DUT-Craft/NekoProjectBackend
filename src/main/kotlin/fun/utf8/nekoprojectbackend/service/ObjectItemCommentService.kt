@@ -1,5 +1,6 @@
 package `fun`.utf8.nekoprojectbackend.service
 
+import `fun`.utf8.nekoprojectbackend.config.ModerationProperties
 import `fun`.utf8.nekoprojectbackend.datasource.jdbc.ObjectItemComment
 import `fun`.utf8.nekoprojectbackend.datasource.jdbc.ObjectItemCommentRepository
 import `fun`.utf8.nekoprojectbackend.datasource.jdbc.ObjectItemCommentStatus
@@ -30,6 +31,7 @@ data class ObjectItemCommentResponse(
 class ObjectItemCommentService(
     private val objectItemRepository: ObjectItemRepository,
     private val objectItemCommentRepository: ObjectItemCommentRepository,
+    private val moderationProperties: ModerationProperties,
 ) {
 
     @Transactional(readOnly = true)
@@ -71,7 +73,7 @@ class ObjectItemCommentService(
                 "评论者昵称不能超过 $MAX_NICK_NAME_LENGTH 个字符",
             )
             it.content = requireText(request.content, "评论内容不能为空")
-            it.status = ObjectItemCommentStatus.PENDING
+            it.status = if (moderationProperties.enabled) ObjectItemCommentStatus.PENDING else ObjectItemCommentStatus.APPROVED
         }
         return objectItemCommentRepository.save(entity).toResponse()
     }

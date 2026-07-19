@@ -1,5 +1,6 @@
 package `fun`.utf8.nekoprojectbackend.service
 
+import `fun`.utf8.nekoprojectbackend.config.ModerationProperties
 import `fun`.utf8.nekoprojectbackend.datasource.jdbc.Mind
 import `fun`.utf8.nekoprojectbackend.datasource.jdbc.MindRepository
 import `fun`.utf8.nekoprojectbackend.datasource.jdbc.MindStatus
@@ -80,10 +81,11 @@ enum class MindSortProperty(val alias: String) {
 
 // SortDirection 定义于 ObjectItemService.kt，此处不再重复声明，避免同包重复定义。
 
-/** 想法业务：增删改查、批量操作、分页/排序、多条件过滤与字段长度校验。新建想法固定 PENDING 待审。 */
+/** 想法业务：增删改查、批量操作、分页/排序、多条件过滤与字段长度校验。新建想法按 neko.moderation.enabled 决定初始状态（开启审核→PENDING，关闭审核→APPROVED 直接公开）。 */
 @Service
 class MindService(
     private val mindRepository: MindRepository,
+    private val moderationProperties: ModerationProperties,
 ) {
 
     @Transactional
@@ -249,7 +251,7 @@ class MindService(
         it.title = requireText(title, "想法标题不能为空", MAX_TITLE_LENGTH, "想法标题不能超过 $MAX_TITLE_LENGTH 个字符")
         it.nickName =
             normalizeNullableText(nickName, MAX_NICK_NAME_LENGTH, "想法昵称不能超过 $MAX_NICK_NAME_LENGTH 个字符")
-        it.status = MindStatus.PENDING
+        it.status = if (moderationProperties.enabled) MindStatus.PENDING else MindStatus.APPROVED
         it.content = requireText(content ?: "", "想法内容不能为空")
         it.mcId = normalizeNullableText(mcId, MAX_MC_ID_LENGTH, "想法 Minecraft ID 不能超过 $MAX_MC_ID_LENGTH 个字符")
     }

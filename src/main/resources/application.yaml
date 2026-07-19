@@ -129,6 +129,11 @@ neko:
     max-archives: ${AUDIT_MAX_ARCHIVES:30}
     # 是否信任 X-Forwarded-For / X-Real-IP：仅在可信反代（Nginx/网关）后才开启，否则客户端可伪造审计 IP
     trust-forwarded: ${AUDIT_TRUST_FORWARDED:false}
+  moderation:
+    # 内容审核开关（评论 / 想法等 UGC 新建后的初始状态）：
+    # true=开启审核，新建置 PENDING 待管理员审核通过后才公开（默认，原行为）；
+    # false=临时关闭审核，新建直接置 APPROVED 立即公开展示
+    enabled: ${MODERATION_ENABLED:true}
   seed:
     # 是否在启动时执行数据 Seeder（初始管理员、演示数据等）
     enabled: ${SEED_ENABLED:true}
