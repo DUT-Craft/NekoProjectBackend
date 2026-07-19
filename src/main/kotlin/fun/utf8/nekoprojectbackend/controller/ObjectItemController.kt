@@ -13,6 +13,45 @@ import org.springframework.security.core.annotation.AuthenticationPrincipal
 import org.springframework.web.bind.annotation.*
 import java.time.LocalDateTime
 
+/** 公开项目卡片响应：不含 ownerId（管理端专用），标签以 [TagSummaryResponse] 携带。 */
+data class ObjectItemPublicResponse(
+    val id: Int?,
+    val title: String?,
+    val introduction: String?,
+    val description: String?,
+    val status: ObjectItemStatus?,
+    val leader: String?,
+    val needMembers: List<NeedMemberItemResponse>,
+    val tags: List<TagSummaryResponse>,
+    val leaderMcId: String?,
+    val contactInformation: String?,
+    val coverImageUrl: String?,
+    val hasControlPassword: Boolean,
+)
+
+private fun ObjectItemResponse.toPublic() = ObjectItemPublicResponse(
+    id = id,
+    title = title,
+    introduction = introduction,
+    description = description,
+    status = status,
+    leader = leader,
+    needMembers = needMembers,
+    tags = tags,
+    leaderMcId = leaderMcId,
+    contactInformation = contactInformation,
+    coverImageUrl = coverImageUrl,
+    hasControlPassword = hasControlPassword,
+)
+
+private data class ObjectItemPage(
+    val content: List<ObjectItemPublicResponse>,
+    val totalElements: Long,
+    val totalPages: Int,
+    val page: Int,
+    val size: Int,
+)
+
 /** 项目条目公开接口（/api/project/object-items）：增删改查、评论、动态、加入申请。 */
 @RestController
 @RequestMapping("/api/project/object-items")
@@ -41,255 +80,67 @@ class ObjectItemController(
             targetId = item.id,
             description = "提交项目《${request.title}》",
         )
-
-        data class Response(
-            val id: Int?,
-            val title: String?,
-            val type: String?,
-            val introduction: String?,
-            val description: String?,
-            val status: ObjectItemStatus?,
-            val leader: String?,
-            val needMembers: List<NeedMemberItemResponse>,
-            val tags: List<String>,
-            val leaderMcId: String?,
-            val contactInformation: String?,
-            val coverImageUrl: String?,
-            val hasControlPassword: Boolean,
-        )
-
-        val rs = Response(
-            id = item.id,
-            title = item.title,
-            type = item.type,
-            introduction = item.introduction,
-            description = item.description,
-            status = item.status,
-            leader = item.leader,
-            needMembers = item.needMembers,
-            tags = item.tags,
-            leaderMcId = item.leaderMcId,
-            contactInformation = item.contactInformation,
-            coverImageUrl = item.coverImageUrl,
-            hasControlPassword = item.hasControlPassword,
-        )
-
-        return builder.ok().data(rs).build()
+        return builder.ok().data(item.toPublic()).build()
     }
 
     @PostMapping("/batch")
     fun saveBatch(@RequestBody request: ObjectItemBatchSaveRequest): ResponseEntity<Response> {
         val items = objectItemService.saveBatch(request.items)
-
-        data class Response(
-            val id: Int?,
-            val title: String?,
-            val type: String?,
-            val introduction: String?,
-            val description: String?,
-            val status: ObjectItemStatus?,
-            val leader: String?,
-            val needMembers: List<NeedMemberItemResponse>,
-            val tags: List<String>,
-            val leaderMcId: String?,
-            val contactInformation: String?,
-            val coverImageUrl: String?,
-            val hasControlPassword: Boolean,
-        )
-
-        val rs = items.map {
-            Response(
-                id = it.id,
-                title = it.title,
-                type = it.type,
-                introduction = it.introduction,
-                description = it.description,
-                status = it.status,
-                leader = it.leader,
-                needMembers = it.needMembers,
-                tags = it.tags,
-                leaderMcId = it.leaderMcId,
-                contactInformation = it.contactInformation,
-                coverImageUrl = it.coverImageUrl,
-                hasControlPassword = it.hasControlPassword,
-            )
-        }
-
-        return builder.ok().data(rs).build()
+        return builder.ok().data(items.map { it.toPublic() }).build()
     }
 
     @GetMapping("/{id}")
     fun getById(@PathVariable id: Int): ResponseEntity<Response> {
         val item = objectItemService.findById(id)
-
-        data class Response(
-            val id: Int?,
-            val title: String?,
-            val type: String?,
-            val introduction: String?,
-            val description: String?,
-            val status: ObjectItemStatus?,
-            val leader: String?,
-            val needMembers: List<NeedMemberItemResponse>,
-            val tags: List<String>,
-            val leaderMcId: String?,
-            val contactInformation: String?,
-            val coverImageUrl: String?,
-            val hasControlPassword: Boolean,
-        )
-
-        val rs = Response(
-            id = item.id,
-            title = item.title,
-            type = item.type,
-            introduction = item.introduction,
-            description = item.description,
-            status = item.status,
-            leader = item.leader,
-            needMembers = item.needMembers,
-            tags = item.tags,
-            leaderMcId = item.leaderMcId,
-            contactInformation = item.contactInformation,
-            coverImageUrl = item.coverImageUrl,
-            hasControlPassword = item.hasControlPassword,
-        )
-
-        return builder.ok().data(rs).build()
+        return builder.ok().data(item.toPublic()).build()
     }
 
     @GetMapping("/status/{status}")
     fun listByStatus(@PathVariable status: ObjectItemStatus): ResponseEntity<Response> {
         val items = objectItemService.findByStatus(status)
-
-        data class Response(
-            val id: Int?,
-            val title: String?,
-            val type: String?,
-            val introduction: String?,
-            val description: String?,
-            val status: ObjectItemStatus?,
-            val leader: String?,
-            val needMembers: List<NeedMemberItemResponse>,
-            val tags: List<String>,
-            val leaderMcId: String?,
-            val contactInformation: String?,
-            val coverImageUrl: String?,
-            val hasControlPassword: Boolean,
-        )
-
-        val rs = items.map {
-            Response(
-                id = it.id,
-                title = it.title,
-                type = it.type,
-                introduction = it.introduction,
-                description = it.description,
-                status = it.status,
-                leader = it.leader,
-                needMembers = it.needMembers,
-                tags = it.tags,
-                leaderMcId = it.leaderMcId,
-                contactInformation = it.contactInformation,
-                coverImageUrl = it.coverImageUrl,
-                hasControlPassword = it.hasControlPassword,
-            )
-        }
-
-        return builder.ok().data(rs).build()
+        return builder.ok().data(items.map { it.toPublic() }).build()
     }
 
+    /**
+     * 公开项目列表：关键字（标题 / 简介 / 描述 / 负责人 / 标签名）+ Cascader 标签筛选 + 数据库分页。
+     * 公开端强制只返回 [PUBLIC_STATUSES] 内的项目，不接受客户端传入 PENDING / REJECTED / DELETED。
+     */
     @GetMapping
     fun list(
         @RequestParam(required = false) ids: List<Int>?,
+        @RequestParam(required = false) keyword: String?,
         @RequestParam(required = false) title: String?,
-        @RequestParam(required = false) type: String?,
-        @RequestParam(required = false) status: ObjectItemStatus?,
-        @RequestParam(required = false) statuses: List<ObjectItemStatus>?,
         @RequestParam(required = false) leader: String?,
         @RequestParam(required = false) leaderMcId: String?,
-        @RequestParam(required = false) tags: List<String>?,
+        @RequestParam(required = false) tagIds: List<Long>?,
+        @RequestParam(required = false) tagMatch: String?,
         @RequestParam(required = false) page: Int?,
         @RequestParam(required = false) size: Int?,
         @RequestParam(required = false) sort: String?,
     ): ResponseEntity<Response> {
         val request = ObjectItemQueryRequest(
             ids = ids,
+            keyword = keyword,
             title = title,
-            type = type,
-            status = status,
-            statuses = statuses,
             leader = leader,
             leaderMcId = leaderMcId,
-            tags = tags,
-        )
-
-        data class Response(
-            val id: Int?,
-            val title: String?,
-            val type: String?,
-            val introduction: String?,
-            val description: String?,
-            val status: ObjectItemStatus?,
-            val leader: String?,
-            val needMembers: List<NeedMemberItemResponse>,
-            val tags: List<String>,
-            val leaderMcId: String?,
-            val contactInformation: String?,
-            val coverImageUrl: String?,
-            val hasControlPassword: Boolean,
-        )
-
-        data class PageResponse(
-            val content: List<Response>,
-            val totalElements: Long,
-            val totalPages: Int,
-            val page: Int,
-            val size: Int,
+            tagIds = tagIds,
+            tagMatch = TagMatch.from(tagMatch),
+            // 公开端固定可见状态，忽略客户端传入
+            statuses = PUBLIC_STATUSES.toList(),
         )
 
         val rs: Any = if (page != null || size != null) {
             val vo = objectItemService.queryPage(request, page ?: 0, size ?: DEFAULT_PAGE_SIZE, sort ?: DEFAULT_SORT)
-            PageResponse(
-                content = vo.content.map {
-                    Response(
-                        id = it.id,
-                        title = it.title,
-                        type = it.type,
-                        introduction = it.introduction,
-                        description = it.description,
-                        status = it.status,
-                        leader = it.leader,
-                        needMembers = it.needMembers,
-                        tags = it.tags,
-                        leaderMcId = it.leaderMcId,
-                        contactInformation = it.contactInformation,
-                        coverImageUrl = it.coverImageUrl,
-                        hasControlPassword = it.hasControlPassword,
-                    )
-                },
+            ObjectItemPage(
+                content = vo.content.map { it.toPublic() },
                 totalElements = vo.totalElements,
                 totalPages = vo.totalPages,
                 page = vo.page,
                 size = vo.size,
             )
         } else {
-            objectItemService.query(request).map {
-                Response(
-                    id = it.id,
-                    title = it.title,
-                    type = it.type,
-                    introduction = it.introduction,
-                    description = it.description,
-                    status = it.status,
-                    leader = it.leader,
-                    needMembers = it.needMembers,
-                    tags = it.tags,
-                    leaderMcId = it.leaderMcId,
-                    contactInformation = it.contactInformation,
-                    coverImageUrl = it.coverImageUrl,
-                    hasControlPassword = it.hasControlPassword,
-                )
-            }
+            objectItemService.query(request).map { it.toPublic() }
         }
 
         return builder.ok().data(rs).build()
@@ -298,42 +149,7 @@ class ObjectItemController(
     @PostMapping("/query")
     fun query(@RequestBody request: ObjectItemQueryRequest): ResponseEntity<Response> {
         val items = objectItemService.query(request)
-
-        data class Response(
-            val id: Int?,
-            val title: String?,
-            val type: String?,
-            val introduction: String?,
-            val description: String?,
-            val status: ObjectItemStatus?,
-            val leader: String?,
-            val needMembers: List<NeedMemberItemResponse>,
-            val tags: List<String>,
-            val leaderMcId: String?,
-            val contactInformation: String?,
-            val coverImageUrl: String?,
-            val hasControlPassword: Boolean,
-        )
-
-        val rs = items.map {
-            Response(
-                id = it.id,
-                title = it.title,
-                type = it.type,
-                introduction = it.introduction,
-                description = it.description,
-                status = it.status,
-                leader = it.leader,
-                needMembers = it.needMembers,
-                tags = it.tags,
-                leaderMcId = it.leaderMcId,
-                contactInformation = it.contactInformation,
-                coverImageUrl = it.coverImageUrl,
-                hasControlPassword = it.hasControlPassword,
-            )
-        }
-
-        return builder.ok().data(rs).build()
+        return builder.ok().data(items.map { it.toPublic() }).build()
     }
 
     @PutMapping("/{id}")
@@ -350,40 +166,7 @@ class ObjectItemController(
             targetId = id,
             description = "更新项目 #$id",
         )
-
-        data class Response(
-            val id: Int?,
-            val title: String?,
-            val type: String?,
-            val introduction: String?,
-            val description: String?,
-            val status: ObjectItemStatus?,
-            val leader: String?,
-            val needMembers: List<NeedMemberItemResponse>,
-            val tags: List<String>,
-            val leaderMcId: String?,
-            val contactInformation: String?,
-            val coverImageUrl: String?,
-            val hasControlPassword: Boolean,
-        )
-
-        val rs = Response(
-            id = item.id,
-            title = item.title,
-            type = item.type,
-            introduction = item.introduction,
-            description = item.description,
-            status = item.status,
-            leader = item.leader,
-            needMembers = item.needMembers,
-            tags = item.tags,
-            leaderMcId = item.leaderMcId,
-            contactInformation = item.contactInformation,
-            coverImageUrl = item.coverImageUrl,
-            hasControlPassword = item.hasControlPassword,
-        )
-
-        return builder.ok().data(rs).build()
+        return builder.ok().data(item.toPublic()).build()
     }
 
     @PutMapping("/batch")
@@ -393,42 +176,8 @@ class ObjectItemController(
     ): ResponseEntity<Response> {
         request.items.forEach { it.id?.let { id -> accessService.ensureCanManage(user, id) } }
         val items = objectItemService.updateBatch(request.items)
-
-        data class Response(
-            val id: Int?,
-            val title: String?,
-            val type: String?,
-            val introduction: String?,
-            val description: String?,
-            val status: ObjectItemStatus?,
-            val leader: String?,
-            val needMembers: List<NeedMemberItemResponse>,
-            val tags: List<String>,
-            val leaderMcId: String?,
-            val contactInformation: String?,
-            val coverImageUrl: String?,
-            val hasControlPassword: Boolean,
-        )
-
-        val rs = items.map {
-            Response(
-                id = it.id,
-                title = it.title,
-                type = it.type,
-                introduction = it.introduction,
-                description = it.description,
-                status = it.status,
-                leader = it.leader,
-                needMembers = it.needMembers,
-                tags = it.tags,
-                leaderMcId = it.leaderMcId,
-                contactInformation = it.contactInformation,
-                coverImageUrl = it.coverImageUrl,
-                hasControlPassword = it.hasControlPassword,
-            )
-        }
-
-        return builder.ok().data(rs).build()
+        // 公开控制器路径：不回写 ownerId，与单条 update 口径一致
+        return builder.ok().data(items.map { it.toPublic() }).build()
     }
 
     @DeleteMapping("/batch")

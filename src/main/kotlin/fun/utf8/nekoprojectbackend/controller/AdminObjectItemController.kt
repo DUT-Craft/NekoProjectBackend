@@ -27,8 +27,11 @@ class AdminObjectItemController(
     fun list(
         @AuthenticationPrincipal admin: LoginUser,
         @RequestParam(required = false) statuses: List<ObjectItemStatus>?,
+        @RequestParam(required = false) keyword: String?,
         @RequestParam(required = false) title: String?,
         @RequestParam(required = false) leader: String?,
+        @RequestParam(required = false) tagIds: List<Long>?,
+        @RequestParam(required = false) tagMatch: String?,
         @RequestParam(required = false) mine: Boolean?,
         @RequestParam(required = false) page: Int?,
         @RequestParam(required = false) size: Int?,
@@ -38,9 +41,12 @@ class AdminObjectItemController(
         // 否则沿用 ownerIdScope——总管理看全部、项目管理看名下。
         val ownerIdScope = if (mine == true) admin.id else accessService.ownerIdScope(admin)
         val request = ObjectItemQueryRequest(
+            keyword = keyword,
             title = title,
             leader = leader,
             statuses = statuses,
+            tagIds = tagIds,
+            tagMatch = TagMatch.from(tagMatch),
             ownerId = ownerIdScope,
         )
         val vo = objectItemService.queryPage(

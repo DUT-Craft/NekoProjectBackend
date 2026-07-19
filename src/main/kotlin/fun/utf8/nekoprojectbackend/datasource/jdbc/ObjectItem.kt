@@ -8,7 +8,6 @@ import jakarta.persistence.*
     name = "object_item",
     indexes = [
         Index(name = "idx_object_item_status", columnList = "status"),
-        Index(name = "idx_object_item_type", columnList = "type"),
         Index(name = "idx_object_item_leader_mc_id", columnList = "leader_mc_id"),
     ],
 )
@@ -20,9 +19,6 @@ class ObjectItem {
 
     @Column(name = "title", nullable = false, length = 128)
     var title: String? = null
-
-    @Column(name = "type", nullable = false, length = 64)
-    var type: String? = null
 
     @Column(name = "introduction", length = 255)
     var introduction: String? = null
@@ -45,13 +41,18 @@ class ObjectItem {
     )
     var needMembers: MutableList<NeedMemberItem>? = null
 
-    @ElementCollection(fetch = FetchType.EAGER)
-    @CollectionTable(
+    /**
+     * 项目标签：多对多关联全局 [Tag] 字典。使用 Set 表达项目内标签不重复；
+     * 关联表 object_item_tag 以 (object_item_id, tag_id) 复合主键作为数据库去重最后防线。
+     * 删除项目不级联删除全局 Tag（无 CascadeType.REMOVE）。
+     */
+    @ManyToMany(fetch = FetchType.LAZY)
+    @JoinTable(
         name = "object_item_tag",
-        joinColumns = [JoinColumn(name = "object_item_id", referencedColumnName = "id")],
+        joinColumns = [JoinColumn(name = "object_item_id")],
+        inverseJoinColumns = [JoinColumn(name = "tag_id")],
     )
-    @Column(name = "tag", length = 32)
-    var tags: MutableList<String>? = null
+    var tags: MutableSet<Tag> = linkedSetOf()
 
     @Column(name = "leader_mc_id", length = 64)
     var leaderMcId: String? = null

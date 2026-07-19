@@ -4,9 +4,11 @@ import `fun`.utf8.nekoprojectbackend.datasource.jdbc.*
 import `fun`.utf8.nekoprojectbackend.handlder.ParamErrorException
 import `fun`.utf8.nekoprojectbackend.handlder.ResourceNotFoundException
 import org.springframework.beans.factory.annotation.Value
+import org.springframework.data.domain.PageRequest
+import org.springframework.data.domain.Sort
+import org.springframework.data.jpa.domain.Specification
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
-import java.util.*
 
 data class NeedMemberItemRequest(
     val skill: String = "",
@@ -22,7 +24,6 @@ data class NeedMemberItemResponse(
 
 data class ObjectItemSaveRequest(
     val title: String = "",
-    val type: String = "",
     val introduction: String? = null,
     val description: String? = null,
     // 未指定时为 null：公开投稿由 toEntity() 固化为 PENDING；管理员创建时由 controller 按角色兜底
@@ -30,7 +31,8 @@ data class ObjectItemSaveRequest(
     var status: ObjectItemStatus? = null,
     val leader: String? = null,
     val needMembers: List<NeedMemberItemRequest>? = null,
-    val tags: List<String>? = null,
+    /** 标签 ID 列表；0~10 个，由 [TagService.resolveSelectableTags] 统一校验（去重 / 存在性 / 可选性）。 */
+    val tagIds: List<Long>? = null,
     val leaderMcId: String? = null,
     val contactInformation: String? = null,
     val coverImageUrl: String? = null,
@@ -44,13 +46,13 @@ data class ObjectItemBatchSaveRequest(
 data class ObjectItemUpdateRequest(
     val id: Int? = null,
     val title: String? = null,
-    val type: String? = null,
     val introduction: String? = null,
     val description: String? = null,
     val status: ObjectItemStatus? = null,
     val leader: String? = null,
     val needMembers: List<NeedMemberItemRequest>? = null,
-    val tags: List<String>? = null,
+    /** 标签 ID：null=不修改；空数组=清空；非空=完整替换。 */
+    val tagIds: List<Long>? = null,
     val leaderMcId: String? = null,
     val contactInformation: String? = null,
     val coverImageUrl: String? = null,
@@ -65,28 +67,46 @@ data class ObjectItemBatchDeleteRequest(
     val ids: List<Int> = emptyList(),
 )
 
+/** 多标签匹配方式：ANY=命中任一；ALL=同时命中全部。 */
+enum class TagMatch {
+    ANY,
+    ALL,
+    ;
+
+    companion object {
+        fun from(value: String?): TagMatch? =
+            value?.let { v ->
+                entries.firstOrNull { it.name.equals(v, ignoreCase = true) }
+                    ?: throw ParamErrorException("不支持的标签匹配方式：$v，支持 ANY / ALL")
+            }
+    }
+}
+
 data class ObjectItemQueryRequest(
     val ids: List<Int>? = null,
+    /** 关键字：跨 标题 / 简介 / 描述 / 负责人 / 标签名 模糊匹配。 */
+    val keyword: String? = null,
+    /** 仅按标题模糊匹配（向后保留）。 */
     val title: String? = null,
-    val type: String? = null,
     val status: ObjectItemStatus? = null,
     val statuses: List<ObjectItemStatus>? = null,
     val leader: String? = null,
     val leaderMcId: String? = null,
-    val tags: List<String>? = null,
+    /** Cascader 选中的标签 ID。 */
+    val tagIds: List<Long>? = null,
+    val tagMatch: TagMatch? = null,
     val ownerId: Long? = null,
 )
 
 data class ObjectItemResponse(
     val id: Int?,
     val title: String?,
-    val type: String?,
     val introduction: String?,
     val description: String?,
     val status: ObjectItemStatus?,
     val leader: String?,
     val needMembers: List<NeedMemberItemResponse>,
-    val tags: List<String>,
+    val tags: List<TagSummaryResponse>,
     val leaderMcId: String?,
     val contactInformation: String?,
     val coverImageUrl: String?,
@@ -123,18 +143,30 @@ enum class SortDirection {
     }
 }
 
-/** 项目条目业务：增删改查、批量操作、分页/排序、多条件过滤与字段长度校验。 */
+/** 项目墙可见状态集合：通过审核（APPROVED）且未删除，含全部运营生命周期状态。 */
+val PUBLIC_STATUSES: Set<ObjectItemStatus> = setOf(
+    ObjectItemStatus.APPROVED,
+    ObjectItemStatus.PREPARING,
+    ObjectItemStatus.RECRUITING,
+    ObjectItemStatus.IN_PROGRESS,
+    ObjectItemStatus.PAUSED,
+)
+
+/**
+ * 项目条目业务：增删改查、批量操作、数据库侧分页 / 排序与多条件过滤（关键字 + 标签 + 状态）。
+ *
+ * 标签校验统一委托 [TagService.resolveSelectableTags]：0~10 个、不可重复、必须存在且为可选活跃节点。
+ */
 @Service
 class ObjectItemService(
     private val objectItemRepository: ObjectItemRepository,
     private val userRepository: UserRepository,
+    private val tagService: TagService,
     @Value("\${neko.project.max-per-manager:10}") private val maxPerManager: Long,
 ) {
 
     @Transactional
     fun save(request: ObjectItemSaveRequest): ObjectItemResponse {
-        // 注意：toEntity() 会把 status 固化为 PENDING，此处的 RECRUITING 赋值实际不生效（疑似遗留，建议确认）。
-        request.status = ObjectItemStatus.RECRUITING
         val entity = request.toEntity()
         return objectItemRepository.save(entity).toResponse()
     }
@@ -154,10 +186,14 @@ class ObjectItemService(
 
     @Transactional(readOnly = true)
     fun query(request: ObjectItemQueryRequest): List<ObjectItemResponse> {
-        return filterObjectItems(request)
-            .sortedBy { it.id ?: Int.MAX_VALUE }
-            .map { it.toResponse() }
-            .toList()
+        val spec = buildSpecification(request)
+        val sorted = Sort.by(Sort.Direction.DESC, ObjectItemSortProperty.ID.alias)
+        val items = if (spec == null) {
+            objectItemRepository.findAll(sorted)
+        } else {
+            objectItemRepository.findAll(spec, sorted)
+        }
+        return items.map { it.toResponse() }
     }
 
     @Transactional(readOnly = true)
@@ -171,89 +207,27 @@ class ObjectItemService(
         if (size > MAX_PAGE_SIZE) {
             throw ParamErrorException("每页条数不能超过 $MAX_PAGE_SIZE 条")
         }
-        val (property, direction) = parseSort(sort)
-
-        val sorted = filterObjectItems(request).let { all ->
-            val comparator: Comparator<ObjectItem> = when (property) {
-                ObjectItemSortProperty.ID -> compareBy { it.id ?: Int.MAX_VALUE }
-            }
-            if (direction == SortDirection.DESC) all.sortedWith(comparator.reversed()) else all.sortedWith(comparator)
+        val pageable = PageRequest.of(page, size, toSpringSort(sort))
+        val spec = buildSpecification(request)
+        val result = if (spec == null) {
+            objectItemRepository.findAll(pageable)
+        } else {
+            objectItemRepository.findAll(spec, pageable)
         }
-
-        val total = sorted.size.toLong()
-        val totalPages = if (total == 0L) 0 else ((total + size - 1) / size).toInt()
-        val fromIndex = minOf(page * size, sorted.size)
-        val toIndex = minOf(fromIndex + size, sorted.size)
-        val pageContent = sorted.subList(fromIndex, toIndex).map { it.toResponse() }
 
         return ObjectItemPageVO(
-            content = pageContent,
-            totalElements = total,
-            totalPages = totalPages,
-            page = page,
-            size = size,
+            content = result.content.map { it.toResponse() },
+            totalElements = result.totalElements,
+            totalPages = result.totalPages,
+            page = result.number,
+            size = result.size,
         )
-    }
-
-    private fun filterObjectItems(request: ObjectItemQueryRequest): List<ObjectItem> {
-        val ids = normalizeIds(request.ids)
-        val normalizedTitle = normalizeNullableText(request.title)
-        val normalizedType = normalizeNullableText(request.type)
-        val normalizedLeader = normalizeNullableText(request.leader)
-        val normalizedLeaderMcId = normalizeNullableText(request.leaderMcId)
-        val normalizedTags = cleanTags(request.tags)
-        val requestedStatuses = normalizeStatuses(request.status, request.statuses)
-        val filterByStatus = requestedStatuses.isNotEmpty()
-
-        val source = if (ids.isNullOrEmpty()) {
-            objectItemRepository.findAll()
-        } else {
-            objectItemRepository.findAllById(ids).toList()
-        }
-
-        return source.asSequence()
-            .filter { normalizedTitle == null || it.title?.contains(normalizedTitle, ignoreCase = true) == true }
-            .filter { normalizedType == null || it.type?.equals(normalizedType, ignoreCase = true) == true }
-            .filter { !filterByStatus || it.status in requestedStatuses }
-            .filter { normalizedLeader == null || it.leader?.contains(normalizedLeader, ignoreCase = true) == true }
-            .filter {
-                normalizedLeaderMcId == null || it.leaderMcId?.equals(
-                    normalizedLeaderMcId,
-                    ignoreCase = true
-                ) == true
-            }
-            .filter { normalizedTags.isEmpty() || it.containsAllTags(normalizedTags) }
-            .filter { request.ownerId == null || it.ownerId == request.ownerId }
-            .toList()
-    }
-
-    private fun normalizeStatuses(status: ObjectItemStatus?, statuses: List<ObjectItemStatus>?): Set<ObjectItemStatus> {
-        return (listOfNotNull(status) + statuses.orEmpty()).toSet()
-    }
-
-    private fun parseSort(sort: String): Pair<ObjectItemSortProperty, SortDirection> {
-        val parts = sort.split(",").map { it.trim() }.filter { it.isNotEmpty() }
-        if (parts.isEmpty()) {
-            return ObjectItemSortProperty.ID to SortDirection.DESC
-        }
-        val property = ObjectItemSortProperty.from(parts[0])
-            ?: throw ParamErrorException("不支持的排序字段：${parts[0]}，支持 id")
-        val direction = if (parts.size > 1) {
-            SortDirection.from(parts[1])
-                ?: throw ParamErrorException("不支持的排序方向：${parts[1]}，支持 asc / desc")
-        } else {
-            SortDirection.DESC
-        }
-        return property to direction
     }
 
     @Transactional(readOnly = true)
     fun findByStatus(status: ObjectItemStatus): List<ObjectItemResponse> {
         return objectItemRepository.findByStatus(status)
-            .asSequence()
-            .sortedBy { it.id ?: Int.MAX_VALUE }
             .map { it.toResponse() }
-            .toList()
     }
 
     @Transactional(readOnly = true)
@@ -346,7 +320,6 @@ class ObjectItemService(
         return ObjectItem().also {
             it.title =
                 requireText(title, "项目标题不能为空", MAX_TITLE_LENGTH, "项目标题不能超过 $MAX_TITLE_LENGTH 个字符")
-            it.type = requireText(type, "项目类型不能为空", MAX_TYPE_LENGTH, "项目类型不能超过 $MAX_TYPE_LENGTH 个字符")
             it.introduction = normalizeNullableText(
                 introduction,
                 MAX_INTRODUCTION_LENGTH,
@@ -356,7 +329,7 @@ class ObjectItemService(
             it.status = ObjectItemStatus.PENDING
             it.leader = normalizeNullableText(leader, MAX_LEADER_LENGTH, "项目负责人不能超过 $MAX_LEADER_LENGTH 个字符")
             it.needMembers = cleanNeedMembers(needMembers).toMutableList()
-            it.tags = cleanTags(tags).toMutableList()
+            it.tags = tagService.resolveSelectableTags(tagIds ?: emptyList())
             it.leaderMcId = normalizeNullableText(
                 leaderMcId,
                 MAX_LEADER_MC_ID_LENGTH,
@@ -384,9 +357,6 @@ class ObjectItemService(
         request.title?.let {
             title = requireText(it, "项目标题不能为空", MAX_TITLE_LENGTH, "项目标题不能超过 $MAX_TITLE_LENGTH 个字符")
         }
-        request.type?.let {
-            type = requireText(it, "项目类型不能为空", MAX_TYPE_LENGTH, "项目类型不能超过 $MAX_TYPE_LENGTH 个字符")
-        }
         request.introduction?.let {
             introduction =
                 normalizeNullableText(it, MAX_INTRODUCTION_LENGTH, "项目简介不能超过 $MAX_INTRODUCTION_LENGTH 个字符")
@@ -397,7 +367,12 @@ class ObjectItemService(
             leader = normalizeNullableText(it, MAX_LEADER_LENGTH, "项目负责人不能超过 $MAX_LEADER_LENGTH 个字符")
         }
         request.needMembers?.let { needMembers = cleanNeedMembers(it).toMutableList() }
-        request.tags?.let { tags = cleanTags(it).toMutableList() }
+        // tagIds：null 不动；空数组清空；非空完整替换（统一校验后原地变更持久化集合）
+        request.tagIds?.let { ids ->
+            val resolved = tagService.resolveSelectableTags(ids)
+            tags.clear()
+            tags.addAll(resolved)
+        }
         request.leaderMcId?.let {
             leaderMcId = normalizeNullableText(
                 it,
@@ -515,30 +490,125 @@ class ObjectItemService(
         }
     }
 
-    private fun cleanTags(tags: List<String>?): List<String> {
-        return tags.orEmpty()
-            .mapNotNull { normalizeNullableText(it, MAX_TAG_LENGTH, "项目标签不能超过 $MAX_TAG_LENGTH 个字符") }
-            .distinctBy { it.lowercase(Locale.ROOT) }
+    /**
+     * 把查询请求组装为 JPA Specification；全部条件为空时返回 null（由调用方走无条件查询）。
+     * 关键字与标签匹配均使用 EXISTS 子查询，主查询不产生 join，避免笛卡尔积与重复行。
+     */
+    private fun buildSpecification(request: ObjectItemQueryRequest): Specification<ObjectItem>? {
+        val specs = mutableListOf<Specification<ObjectItem>>()
+
+        normalizeNullableText(request.keyword)?.let { kw -> specs += keywordSpec(kw) }
+        normalizeNullableText(request.title)?.let { t -> specs += containsSpec("title", t) }
+        normalizeNullableText(request.leader)?.let { l -> specs += containsSpec("leader", l) }
+        request.leaderMcId?.trim()?.takeIf { it.isNotBlank() }?.let { m -> specs += equalsIgnoreCaseSpec("leaderMcId", m) }
+        request.ownerId?.let { oid -> specs += Specification { root, _, cb -> cb.equal(root.get<Long>("ownerId"), oid) } }
+        normalizeIds(request.ids)?.let { ids ->
+            specs += Specification { root, _, _ -> root.get<Int>("id").`in`(ids) }
+        }
+        val statuses = normalizeStatuses(request.status, request.statuses)
+        if (statuses.isNotEmpty()) {
+            specs += Specification { root, _, _ -> root.get<ObjectItemStatus>("status").`in`(statuses) }
+        }
+        request.tagIds?.filter { it > 0L }?.distinct()?.takeIf { it.isNotEmpty() }?.let { ids ->
+            val match = request.tagMatch ?: TagMatch.ANY
+            specs += when (match) {
+                TagMatch.ANY -> tagAnySpec(ids)
+                TagMatch.ALL -> tagAllSpec(ids)
+            }
+        }
+
+        return if (specs.isEmpty()) null else specs.reduce { acc, s -> acc.and(s) }
     }
 
-    private fun ObjectItem.containsAllTags(requiredTags: List<String>): Boolean {
-        val existingTags = tags.orEmpty()
-        return requiredTags.all { requiredTag ->
-            existingTags.any { it.equals(requiredTag, ignoreCase = true) }
+    private fun keywordSpec(keyword: String): Specification<ObjectItem> = Specification { root, query, cb ->
+        val pattern = "%${keyword.lowercase()}%"
+        val tagSub = query.subquery(Long::class.javaObjectType)
+        val subProject = tagSub.from(ObjectItem::class.java)
+        val tag = subProject.joinSet<ObjectItem, Tag>("tags")
+        tagSub.select(tag.get<Long>("id"))
+        tagSub.where(
+            cb.equal(subProject.get<Int>("id"), root.get<Int>("id")),
+            cb.like(cb.lower(tag.get("name")), pattern),
+        )
+        cb.or(
+            cb.like(cb.lower(root.get("title")), pattern),
+            cb.like(cb.lower(root.get("introduction")), pattern),
+            cb.like(cb.lower(root.get("description")), pattern),
+            cb.like(cb.lower(root.get("leader")), pattern),
+            cb.exists(tagSub),
+        )
+    }
+
+    private fun containsSpec(field: String, raw: String): Specification<ObjectItem> = Specification { root, _, cb ->
+        cb.like(cb.lower(root.get<String>(field)), "%${raw.lowercase()}%")
+    }
+
+    private fun equalsIgnoreCaseSpec(field: String, raw: String): Specification<ObjectItem> = Specification { root, _, cb ->
+        cb.equal(cb.lower(root.get<String>(field)), raw.lowercase())
+    }
+
+    private fun tagAnySpec(tagIds: List<Long>): Specification<ObjectItem> = Specification { root, query, cb ->
+        val sub = query.subquery(Long::class.javaObjectType)
+        val subProject = sub.from(ObjectItem::class.java)
+        val tag = subProject.joinSet<ObjectItem, Tag>("tags")
+        sub.select(tag.get<Long>("id"))
+        sub.where(
+            cb.equal(subProject.get<Int>("id"), root.get<Int>("id")),
+            tag.get<Long>("id").`in`(tagIds),
+        )
+        cb.exists(sub)
+    }
+
+    private fun tagAllSpec(tagIds: List<Long>): Specification<ObjectItem> = Specification { root, query, cb ->
+        val sub = query.subquery(Long::class.javaObjectType)
+        val subProject = sub.from(ObjectItem::class.java)
+        val tag = subProject.joinSet<ObjectItem, Tag>("tags")
+        sub.select(cb.countDistinct(tag.get<Long>("id")))
+        sub.where(
+            cb.equal(subProject.get<Int>("id"), root.get<Int>("id")),
+            tag.get<Long>("id").`in`(tagIds),
+        )
+        cb.equal(sub, tagIds.size.toLong())
+    }
+
+    private fun normalizeStatuses(status: ObjectItemStatus?, statuses: List<ObjectItemStatus>?): Set<ObjectItemStatus> {
+        return (listOfNotNull(status) + statuses.orEmpty()).toSet()
+    }
+
+    private fun parseSort(sort: String): Pair<ObjectItemSortProperty, SortDirection> {
+        val parts = sort.split(",").map { it.trim() }.filter { it.isNotEmpty() }
+        if (parts.isEmpty()) {
+            return ObjectItemSortProperty.ID to SortDirection.DESC
         }
+        val property = ObjectItemSortProperty.from(parts[0])
+            ?: throw ParamErrorException("不支持的排序字段：${parts[0]}，支持 id")
+        val direction = if (parts.size > 1) {
+            SortDirection.from(parts[1])
+                ?: throw ParamErrorException("不支持的排序方向：${parts[1]}，支持 asc / desc")
+        } else {
+            SortDirection.DESC
+        }
+        return property to direction
+    }
+
+    private fun toSpringSort(sort: String): Sort {
+        val (property, direction) = parseSort(sort)
+        val dir = if (direction == SortDirection.DESC) Sort.Direction.DESC else Sort.Direction.ASC
+        return Sort.by(dir, property.alias)
     }
 
     private fun ObjectItem.toResponse(): ObjectItemResponse {
         return ObjectItemResponse(
             id = id,
             title = title,
-            type = type,
             introduction = introduction,
             description = description,
             status = status,
             leader = leader,
             needMembers = needMembers.orEmpty().map { it.toResponse() },
-            tags = tags.orEmpty().toList(),
+            tags = tags.orEmpty()
+                .map { TagSummaryResponse(id = it.id ?: 0L, name = it.name ?: "", parentId = it.parentId) }
+                .sortedBy { it.id },
             leaderMcId = leaderMcId,
             contactInformation = contactInformation,
             coverImageUrl = coverImageUrl,
@@ -556,19 +626,17 @@ class ObjectItemService(
     }
 
     private companion object {
-        private const val MAX_BATCH_SIZE = 100
-        private const val MAX_TITLE_LENGTH = 128
-        private const val MAX_TYPE_LENGTH = 64
-        private const val MAX_INTRODUCTION_LENGTH = 255
-        private const val MAX_LEADER_LENGTH = 64
-        private const val MAX_NEED_MEMBER_SIZE = 100
-        private const val MAX_NEED_MEMBER_SKILL_LENGTH = 64
-        private const val MAX_NEED_MEMBER_CONTEXT_LENGTH = 255
-        private const val MAX_LEADER_MC_ID_LENGTH = 64
-        private const val MAX_CONTACT_INFORMATION_LENGTH = 255
-        private const val MAX_COVER_IMAGE_URL_LENGTH = 512
-        private const val MAX_CONTROL_PASSWORD_LENGTH = 255
-        private const val MAX_TAG_LENGTH = 32
-        private const val MAX_PAGE_SIZE = 1024
+        const val MAX_BATCH_SIZE = 100
+        const val MAX_TITLE_LENGTH = 128
+        const val MAX_INTRODUCTION_LENGTH = 255
+        const val MAX_LEADER_LENGTH = 64
+        const val MAX_NEED_MEMBER_SIZE = 100
+        const val MAX_NEED_MEMBER_SKILL_LENGTH = 64
+        const val MAX_NEED_MEMBER_CONTEXT_LENGTH = 255
+        const val MAX_LEADER_MC_ID_LENGTH = 64
+        const val MAX_CONTACT_INFORMATION_LENGTH = 255
+        const val MAX_COVER_IMAGE_URL_LENGTH = 512
+        const val MAX_CONTROL_PASSWORD_LENGTH = 255
+        const val MAX_PAGE_SIZE = 1024
     }
 }

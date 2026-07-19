@@ -17,13 +17,13 @@ data class ObjectItemManageVerifyRequest(
 data class ObjectItemManageUpdateRequest(
     val controlPassword: String = "",
     val title: String? = null,
-    val type: String? = null,
     val introduction: String? = null,
     val description: String? = null,
     val status: ObjectItemStatus? = null,
     val leader: String? = null,
     val needMembers: List<NeedMemberItemRequest>? = null,
-    val tags: List<String>? = null,
+    /** 标签 ID：null=不修改；空数组=清空；非空=完整替换。 */
+    val tagIds: List<Long>? = null,
     val leaderMcId: String? = null,
     val contactInformation: String? = null,
 )
@@ -57,13 +57,12 @@ class ObjectItemManagementService(
             ObjectItemUpdateRequest(
                 id = id,
                 title = request.title,
-                type = request.type,
                 introduction = request.introduction,
                 description = request.description,
                 status = request.status,
                 leader = request.leader,
                 needMembers = request.needMembers,
-                tags = request.tags,
+                tagIds = request.tagIds,
                 leaderMcId = request.leaderMcId,
                 contactInformation = request.contactInformation,
             ),
@@ -141,7 +140,6 @@ class ObjectItemManagementService(
         return ObjectItemResponse(
             id = id,
             title = title,
-            type = type,
             introduction = introduction,
             description = description,
             status = status,
@@ -153,7 +151,9 @@ class ObjectItemManagementService(
                     context = it.context,
                 )
             },
-            tags = tags.orEmpty().toList(),
+            tags = tags.orEmpty()
+                .map { TagSummaryResponse(id = it.id ?: 0L, name = it.name ?: "", parentId = it.parentId) }
+                .sortedBy { it.id },
             leaderMcId = leaderMcId,
             contactInformation = contactInformation,
             coverImageUrl = coverImageUrl,

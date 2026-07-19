@@ -38,6 +38,10 @@ class ResourceNotFoundException(
     message: String = "资源不存在"
 ) : BusinessException(HttpStatus.NOT_FOUND, message)
 
+class ConflictException(
+    message: String = "资源冲突"
+) : BusinessException(HttpStatus.CONFLICT, message)
+
 class ParamErrorException(
     message: String = "参数错误"
 ) : BusinessException(HttpStatus.BAD_REQUEST, message)
