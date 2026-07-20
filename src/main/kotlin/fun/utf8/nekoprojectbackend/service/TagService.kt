@@ -6,6 +6,7 @@ import `fun`.utf8.nekoprojectbackend.datasource.jdbc.TagRepository
 import `fun`.utf8.nekoprojectbackend.handlder.ConflictException
 import `fun`.utf8.nekoprojectbackend.handlder.ParamErrorException
 import `fun`.utf8.nekoprojectbackend.handlder.ResourceNotFoundException
+import org.springframework.dao.DataIntegrityViolationException
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
 import java.time.LocalDateTime
@@ -89,6 +90,8 @@ class TagService(
     @Transactional
     fun create(request: TagSaveRequest): TagAdminResponse {
         val name = requireTagName(request.name)
+        val description = normalizeDescription(request.description)
+        tagRepository.findAllActiveForUpdate()
         val parentId = request.parentId?.let { requireParentId(it) }
         ensureNameAvailable(name, excludeId = null)
         val now = LocalDateTime.now()
@@ -98,20 +101,26 @@ class TagService(
             this.parentId = parentId
             this.selectable = request.selectable
             this.sortOrder = request.sortOrder
-            this.description = normalizeDescription(request.description)
+            this.description = description
             this.createTime = now
             this.updateTime = now
         }
-        return toAdmin(tagRepository.save(tag), 0L)
+        return try {
+            toAdmin(tagRepository.saveAndFlush(tag), 0L)
+        } catch (_: DataIntegrityViolationException) {
+            throw ConflictException("标签名已存在")
+        }
     }
 
     @Transactional
     fun update(id: Long, request: TagSaveRequest): TagAdminResponse {
+        val name = requireTagName(request.name)
+        val description = normalizeDescription(request.description)
+        tagRepository.findAllActiveForUpdate()
         val tag = findTag(id)
         if (tag.deletedAt != null) {
             throw ParamErrorException("标签已删除，不能修改")
         }
-        val name = requireTagName(request.name)
         val newParentId = request.parentId
         if (newParentId != null && newParentId != tag.parentId) {
             if (isAncestorOrSelf(candidateAncestor = id, nodeId = newParentId)) {
@@ -123,11 +132,19 @@ class TagService(
         tag.name = name
         tag.normalizedName = normalize(name)
         tag.parentId = newParentId
+        val projectCount = tagRepository.countProjectsByTagId(id)
+        if (tag.selectable == true && !request.selectable && projectCount > 0) {
+            throw ConflictException("该标签仍被 $projectCount 个项目使用，不能改为不可选")
+        }
         tag.selectable = request.selectable
         tag.sortOrder = request.sortOrder
-        tag.description = normalizeDescription(request.description)
+        tag.description = description
         tag.updateTime = LocalDateTime.now()
-        return toAdmin(tagRepository.save(tag), tagRepository.countProjectsByTagId(id))
+        return try {
+            toAdmin(tagRepository.saveAndFlush(tag), projectCount)
+        } catch (_: DataIntegrityViolationException) {
+            throw ConflictException("标签名已存在")
+        }
     }
 
     /**
@@ -136,6 +153,7 @@ class TagService(
      */
     @Transactional
     fun delete(id: Long): Long {
+        tagRepository.findAllActiveForUpdate()
         val tag = findTag(id)
         if (tag.deletedAt != null) {
             // 已删除：幂等返回 0
@@ -146,9 +164,10 @@ class TagService(
             throw ConflictException("该标签下还有 $activeChildren 个子节点，请先处理子节点后再删除")
         }
         val affected = tagRepository.countProjectsByTagId(id)
-        // 解除关联：通过实体集合移除，确保持久化上下文一致（同一事务内同一 PC，引用相等）
-        objectItemRepository.findByTagId(id).forEach { project -> project.tags.remove(tag) }
+        // 直接清理关联表，避免为删除一个标签加载所有关联项目。
+        objectItemRepository.deleteTagAssociations(id)
         val now = LocalDateTime.now()
+        tag.normalizedName = "__deleted__${id}_${tag.normalizedName}"
         tag.deletedAt = now
         tag.updateTime = now
         tagRepository.save(tag)
@@ -161,7 +180,7 @@ class TagService(
      * 校验顺序：数量 ≤10 → ID 为正 → 不重复 → 全部存在 → 未删除且可选用。
      * 返回按请求顺序组织的 [LinkedHashSet]，表达项目内标签不重复的领域约束。
      */
-    @Transactional(readOnly = true)
+    @Transactional
     fun resolveSelectableTags(tagIds: List<Long>): LinkedHashSet<Tag> {
         if (tagIds.size > MAX_TAGS_PER_PROJECT) {
             throw ParamErrorException("项目最多只能选择 $MAX_TAGS_PER_PROJECT 个标签")
@@ -173,7 +192,8 @@ class TagService(
         if (positiveIds.toSet().size != positiveIds.size) {
             throw ParamErrorException("项目标签不能重复")
         }
-        val byId = tagRepository.findAllById(positiveIds).associateBy { it.id!! }
+        val byId = if (positiveIds.isEmpty()) emptyMap() else
+            tagRepository.findAllByIdForShare(positiveIds).associateBy { it.id!! }
         val missing = positiveIds.filter { byId[it] == null }
         if (missing.isNotEmpty()) {
             throw ParamErrorException("标签不存在：${missing.joinToString(", ")}")
@@ -260,7 +280,13 @@ class TagService(
         return trimmed
     }
 
-    private fun normalizeDescription(raw: String?): String? = raw?.trim()?.ifBlank { null }
+    private fun normalizeDescription(raw: String?): String? {
+        val normalized = raw?.trim()?.ifBlank { null }
+        if (normalized != null && normalized.length > MAX_DESCRIPTION_LENGTH) {
+            throw ParamErrorException("标签描述不能超过 $MAX_DESCRIPTION_LENGTH 个字符")
+        }
+        return normalized
+    }
 
     private fun normalize(name: String): String = name.trim().lowercase(Locale.ROOT)
 
@@ -283,5 +309,6 @@ class TagService(
     private companion object {
         const val MAX_NAME_LENGTH = 32
         const val MAX_TAGS_PER_PROJECT = 10
+        const val MAX_DESCRIPTION_LENGTH = 255
     }
 }

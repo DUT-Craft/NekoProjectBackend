@@ -475,6 +475,18 @@ class ObjectItemService(
         }
     }
 
+    private fun normalizeTagQueryIds(ids: List<Long>?): List<Long>? {
+        if (ids == null) return null
+        if (ids.size > MAX_QUERY_TAG_IDS) {
+            throw ParamErrorException("标签筛选不能超过 $MAX_QUERY_TAG_IDS 个")
+        }
+        ids.forEach { if (it <= 0L) throw ParamErrorException("标签 ID 必须大于 0") }
+        if (ids.toSet().size != ids.size) {
+            throw ParamErrorException("标签筛选条件不能重复")
+        }
+        return ids
+    }
+
     /**
      * 把查询请求组装为 JPA Specification；全部条件为空时返回 null（由调用方走无条件查询）。
      * 关键字与标签匹配均使用 EXISTS 子查询，主查询不产生 join，避免笛卡尔积与重复行。
@@ -494,7 +506,7 @@ class ObjectItemService(
         if (statuses.isNotEmpty()) {
             specs += Specification { root, _, _ -> root.get<ObjectItemStatus>("status").`in`(statuses) }
         }
-        request.tagIds?.filter { it > 0L }?.distinct()?.takeIf { it.isNotEmpty() }?.let { ids ->
+        normalizeTagQueryIds(request.tagIds)?.takeIf { it.isNotEmpty() }?.let { ids ->
             val match = request.tagMatch ?: TagMatch.ANY
             specs += when (match) {
                 TagMatch.ANY -> tagAnySpec(ids)
@@ -514,6 +526,7 @@ class ObjectItemService(
         tagSub.where(
             cb.equal(subProject.get<Int>("id"), root.get<Int>("id")),
             cb.like(cb.lower(tag.get("name")), pattern),
+            cb.isNull(tag.get<Any>("deletedAt")),
         )
         cb.or(
             cb.like(cb.lower(root.get("title")), pattern),
@@ -540,6 +553,7 @@ class ObjectItemService(
         sub.where(
             cb.equal(subProject.get<Int>("id"), root.get<Int>("id")),
             tag.get<Long>("id").`in`(tagIds),
+            cb.isNull(tag.get<Any>("deletedAt")),
         )
         cb.exists(sub)
     }
@@ -552,6 +566,7 @@ class ObjectItemService(
         sub.where(
             cb.equal(subProject.get<Int>("id"), root.get<Int>("id")),
             tag.get<Long>("id").`in`(tagIds),
+            cb.isNull(tag.get<Any>("deletedAt")),
         )
         cb.equal(sub, tagIds.size.toLong())
     }
@@ -592,6 +607,7 @@ class ObjectItemService(
             leader = leader,
             needMembers = needMembers.orEmpty().map { it.toResponse() },
             tags = tags.orEmpty()
+                .filter { it.deletedAt == null }
                 .map { TagSummaryResponse(id = it.id ?: 0L, name = it.name ?: "", parentId = it.parentId) }
                 .sortedBy { it.id },
             leaderMcId = leaderMcId,
@@ -621,5 +637,6 @@ class ObjectItemService(
         const val MAX_CONTACT_INFORMATION_LENGTH = 255
         const val MAX_COVER_IMAGE_URL_LENGTH = 512
         const val MAX_PAGE_SIZE = 1024
+        const val MAX_QUERY_TAG_IDS = 100
     }
 }

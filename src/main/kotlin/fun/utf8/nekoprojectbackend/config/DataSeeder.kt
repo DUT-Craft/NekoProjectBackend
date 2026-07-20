@@ -177,7 +177,8 @@ class DataSeeder(
      * 返回 normalizedName → Tag 映射，供项目关联按名称复用。重复执行不会创建重复 Tag。
      */
     private fun seedTags(): Map<String, Tag> {
-        val byName = mutableMapOf<String, Tag>()
+        val byName = tagRepository.findByDeletedAtIsNull()
+            .associateByTo(mutableMapOf()) { it.normalizedName!! }
         val now = LocalDateTime.now()
 
         fun norm(name: String) = name.trim().lowercase(Locale.ROOT)

@@ -3,6 +3,7 @@ package `fun`.utf8.nekoprojectbackend.datasource.jdbc
 import org.springframework.data.jpa.repository.JpaRepository
 import org.springframework.data.jpa.repository.JpaSpecificationExecutor
 import org.springframework.data.jpa.repository.Query
+import org.springframework.data.jpa.repository.Modifying
 import org.springframework.stereotype.Repository
 
 /**
@@ -26,6 +27,7 @@ interface ObjectItemRepository : JpaRepository<ObjectItem, Int>, JpaSpecificatio
     fun findByOwnerId(ownerId: Long): List<ObjectItem>
 
     /** 关联了指定标签的全部项目（供软删除标签时解除关联）。 */
-    @Query("select o from ObjectItem o join o.tags t where t.id = ?1")
-    fun findByTagId(tagId: Long): List<ObjectItem>
+    @Modifying(flushAutomatically = true, clearAutomatically = true)
+    @Query(value = "delete from object_item_tag where tag_id = ?1", nativeQuery = true)
+    fun deleteTagAssociations(tagId: Long): Int
 }

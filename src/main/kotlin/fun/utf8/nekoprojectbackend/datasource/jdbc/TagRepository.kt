@@ -1,6 +1,8 @@
 package `fun`.utf8.nekoprojectbackend.datasource.jdbc
 
+import jakarta.persistence.LockModeType
 import org.springframework.data.jpa.repository.JpaRepository
+import org.springframework.data.jpa.repository.Lock
 import org.springframework.data.jpa.repository.Query
 import org.springframework.stereotype.Repository
 
@@ -12,6 +14,14 @@ interface TagRepository : JpaRepository<Tag, Long> {
 
     /** 按标准化名称查找活跃 Tag，用于唯一性校验。 */
     fun findByNormalizedNameAndDeletedAtIsNull(normalizedName: String): Tag?
+
+    @Lock(LockModeType.PESSIMISTIC_READ)
+    @Query("select t from Tag t where t.id in ?1 order by t.id")
+    fun findAllByIdForShare(ids: Collection<Long>): List<Tag>
+
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("select t from Tag t where t.deletedAt is null order by t.id")
+    fun findAllActiveForUpdate(): List<Tag>
 
     /** 统计活跃子节点数量，删除父节点前用以阻止误删整条分支。 */
     fun countByParentIdAndDeletedAtIsNull(parentId: Long): Long

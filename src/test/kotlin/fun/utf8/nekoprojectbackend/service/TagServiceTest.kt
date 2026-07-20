@@ -1,6 +1,5 @@
 package `fun`.utf8.nekoprojectbackend.service
 
-import `fun`.utf8.nekoprojectbackend.datasource.jdbc.ObjectItem
 import `fun`.utf8.nekoprojectbackend.datasource.jdbc.ObjectItemRepository
 import `fun`.utf8.nekoprojectbackend.datasource.jdbc.Tag
 import `fun`.utf8.nekoprojectbackend.datasource.jdbc.TagRepository
@@ -9,6 +8,7 @@ import `fun`.utf8.nekoprojectbackend.handlder.ParamErrorException
 import `fun`.utf8.nekoprojectbackend.handlder.ResourceNotFoundException
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse
+import org.junit.jupiter.api.Assertions.assertNotEquals
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.assertThrows
@@ -56,7 +56,8 @@ class TagServiceTest {
 
     @Test
     fun `resolveSelectableTags preserves request order and dedups via LinkedHashSet`() {
-        whenever(tagRepository.findAllById(any())).thenReturn(listOf(tag(1, "建筑"), tag(2, "长期"), tag(3, "RPG")))
+        whenever(tagRepository.findAllByIdForShare(listOf(3L, 1L, 2L)))
+            .thenReturn(listOf(tag(1, "建筑"), tag(2, "长期"), tag(3, "RPG")))
         val resolved = service.resolveSelectableTags(listOf(3L, 1L, 2L))
         assertEquals(listOf(3L, 1L, 2L), resolved.map { it.id })
     }
@@ -82,7 +83,8 @@ class TagServiceTest {
 
     @Test
     fun `resolveSelectableTags rejects missing ids with list`() {
-        whenever(tagRepository.findAllById(any())).thenReturn(listOf(tag(1, "建筑"))) // 2、3 缺失
+        whenever(tagRepository.findAllByIdForShare(listOf(1L, 2L, 3L)))
+            .thenReturn(listOf(tag(1, "建筑"))) // 2、3 缺失
         val ex = assertThrows<ParamErrorException> { service.resolveSelectableTags(listOf(1L, 2L, 3L)) }
         assertTrue(ex.message.contains("不存在"))
         assertTrue(ex.message.contains("2"))
@@ -91,14 +93,16 @@ class TagServiceTest {
 
     @Test
     fun `resolveSelectableTags rejects deleted tag`() {
-        whenever(tagRepository.findAllById(any())).thenReturn(listOf(tag(1, "建筑", deleted = true)))
+        whenever(tagRepository.findAllByIdForShare(listOf(1L)))
+            .thenReturn(listOf(tag(1, "建筑", deleted = true)))
         val ex = assertThrows<ParamErrorException> { service.resolveSelectableTags(listOf(1L)) }
         assertTrue(ex.message.contains("已删除"))
     }
 
     @Test
     fun `resolveSelectableTags rejects non-selectable group tag`() {
-        whenever(tagRepository.findAllById(any())).thenReturn(listOf(tag(1, "项目方向", selectable = false)))
+        whenever(tagRepository.findAllByIdForShare(listOf(1L)))
+            .thenReturn(listOf(tag(1, "项目方向", selectable = false)))
         val ex = assertThrows<ParamErrorException> { service.resolveSelectableTags(listOf(1L)) }
         assertTrue(ex.message.contains("分组"))
     }
@@ -147,12 +151,33 @@ class TagServiceTest {
     @Test
     fun `create trims name normalizes and persists`() {
         whenever(tagRepository.findByNormalizedNameAndDeletedAtIsNull("建筑")).thenReturn(null)
-        whenever(tagRepository.save(any())).thenAnswer { it.getArgument<Tag>(0).apply { id = 42L } }
+        whenever(tagRepository.saveAndFlush(any())).thenAnswer { it.getArgument<Tag>(0).apply { id = 42L } }
         val result = service.create(TagSaveRequest(name = "  建筑  ", sortOrder = 2, description = "  建造类 "))
         assertEquals("建筑", result.name)
         assertEquals(2, result.sortOrder)
         assertEquals("建造类", result.description)
         assertFalse(result.deleted)
+    }
+
+    @Test
+    fun `create rejects description longer than database column`() {
+        assertThrows<ParamErrorException> {
+            service.create(TagSaveRequest(name = "valid", description = "x".repeat(256)))
+        }
+        Mockito.verifyNoInteractions(tagRepository, objectItemRepository)
+    }
+
+    @Test
+    fun `update refuses to make a tag non-selectable while projects use it`() {
+        val existing = tag(1, "active")
+        whenever(tagRepository.findById(1L)).thenReturn(Optional.of(existing))
+        whenever(tagRepository.countProjectsByTagId(1L)).thenReturn(1L)
+
+        assertThrows<ConflictException> {
+            service.update(1L, TagSaveRequest(name = "active", selectable = false))
+        }
+        assertTrue(existing.selectable == true)
+        Mockito.verify(tagRepository, Mockito.never()).saveAndFlush(any())
     }
 
     @Test
@@ -179,18 +204,19 @@ class TagServiceTest {
     }
 
     @Test
-    fun `delete detaches projects and soft deletes leaf tag`() {
+    fun `delete bulk detaches projects and tombstones leaf tag name`() {
         val leaf = tag(1, "建筑")
-        val project = ObjectItem().apply { id = 10; tags.add(leaf) }
         whenever(tagRepository.findById(1L)).thenReturn(Optional.of(leaf))
         whenever(tagRepository.countByParentIdAndDeletedAtIsNull(1L)).thenReturn(0L)
         whenever(tagRepository.countProjectsByTagId(1L)).thenReturn(1L)
-        whenever(objectItemRepository.findByTagId(1L)).thenReturn(listOf(project))
+        whenever(objectItemRepository.deleteTagAssociations(1L)).thenReturn(1)
 
         val affected = service.delete(1L)
         assertEquals(1L, affected)
-        assertTrue(project.tags.isEmpty())
         assertTrue(leaf.deletedAt != null)
+        assertNotEquals("建筑", leaf.normalizedName)
+        assertTrue(leaf.normalizedName.orEmpty().contains("1"))
+        Mockito.verify(objectItemRepository).deleteTagAssociations(1L)
     }
 
     @Test

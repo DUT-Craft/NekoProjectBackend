@@ -6,18 +6,17 @@ import java.time.LocalDateTime
 /**
  * 全局标签字典实体：自关联父子层级，驱动前端 Cascader 预设。
  *
- * - name 为展示名；normalizedName（trim + 小写）用于活跃 Tag 之间的唯一性校验，
- *   服务层 [fun.utf8.nekoprojectbackend.service.TagService] 兜底，数据库侧由生产迁移脚本补齐部分唯一索引
- *   （`WHERE deleted_at IS NULL`，Hibernate 注解无法表达部分索引，故实体不声明唯一约束）。
+ * - name 为展示名；normalizedName（trim + 小写）由数据库唯一约束兜底。
+ *   软删除时 normalizedName 会改为带 ID 的墓碑值，使原名称可以再次创建。
  * - parentId 非空表示子节点；selectable=false 表示仅用于分组的「不可选」节点（项目不能直接关联）。
  * - deletedAt 非空表示软删除：不再出现在公开树 / 项目选择器 / 搜索中，并解除全部项目关联。
  */
 @Entity
 @Table(
     name = "tag",
+    uniqueConstraints = [UniqueConstraint(name = "uk_tag_normalized_name", columnNames = ["normalized_name"])],
     indexes = [
         Index(name = "idx_tag_parent_sort", columnList = "parent_id, sort_order, id"),
-        Index(name = "idx_tag_normalized_name", columnList = "normalized_name"),
     ],
 )
 class Tag {
@@ -29,7 +28,7 @@ class Tag {
     @Column(name = "name", nullable = false, length = 32)
     var name: String? = null
 
-    @Column(name = "normalized_name", nullable = false, length = 32)
+    @Column(name = "normalized_name", nullable = false, length = 160)
     var normalizedName: String? = null
 
     /** 父 Tag ID；为空表示根节点。仅保存 ID，不建立双向 JPA 关系，避免循环序列化与级联复杂度。 */
