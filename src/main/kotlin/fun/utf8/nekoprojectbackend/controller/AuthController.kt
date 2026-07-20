@@ -127,44 +127,6 @@ class AuthController(
             .build()
     }
 
-    /** 项目管理凭一次性邀请码注册（过渡保留，阶段四补 /register 公开注册）。 */
-    @PostMapping("/register/manager")
-    fun registerManager(
-        @RequestBody req: AuthService.RegisterManagerRequest,
-        request: HttpServletRequest,
-    ): ResponseEntity<Response> {
-        val userAgent = request.getHeader("User-Agent") ?: ""
-        val result = try {
-            authService.registerManager(req, userAgent)
-        } catch (e: Exception) {
-            operationLogService.record(
-                action = "PM_REGISTER",
-                targetType = "USER",
-                operatorName = req.username,
-                description = "项目管理注册失败",
-                success = false,
-                error = e.message,
-            )
-            throw e
-        }
-        operationLogService.record(
-            action = "PM_REGISTER",
-            targetType = "USER",
-            targetId = result.id,
-            operatorName = req.username,
-            description = "项目管理注册：${result.username}",
-        )
-
-        data class RegisterResult(
-            val id: Long,
-            val username: String,
-            val role: Role,
-        )
-
-        val rs = RegisterResult(id = result.id, username = result.username, role = result.role)
-        return builder.ok().data(rs).build()
-    }
-
     /** 普通用户公开注册（设计 §4.1，无需邀请码）。 */
     @PostMapping("/register")
     fun register(
@@ -201,23 +163,6 @@ class AuthController(
 
         val rs = RegisterResult(id = result.id, username = result.username, role = result.role)
         return builder.ok().data(rs).build()
-    }
-
-    /** 已登录用户凭邀请码补授项目创建资格（设计 §4.2）。 */
-    @PostMapping("/create-project-grant")
-    fun createProjectGrant(
-        @AuthenticationPrincipal user: LoginUser,
-        @RequestBody req: AuthService.CreateProjectGrantRequest,
-    ): ResponseEntity<Response> {
-        authService.grantCreateProject(user.id, req)
-        operationLogService.record(
-            operator = user,
-            action = "CREATE_PROJECT_GRANT",
-            targetType = "USER",
-            targetId = user.id,
-            description = "凭邀请码补授项目创建资格",
-        )
-        return builder.ok().message("项目创建资格已授予").build()
     }
 
     /**

@@ -28,7 +28,6 @@ class AuthService(
     private val passwordEncoder: PasswordEncoder,
     private val jwtService: JwtService,
     private val tokenStore: TokenStore,
-    private val inviteCodeService: InviteCodeService,
     private val verificationCodeService: VerificationCodeService,
     private val mailService: MailService,
     private val rateLimiter: RateLimiter,
@@ -45,21 +44,6 @@ class AuthService(
         val refreshExpiresIn: Long,
     )
 
-    data class RegisterManagerRequest(
-        val inviteCode: String,
-        val username: String,
-        val password: String,
-        val confirmPassword: String,
-        val email: String,
-        val emailCode: String,
-    )
-
-    data class RegisterManagerResponse(
-        val id: Long,
-        val username: String,
-        val role: Role,
-    )
-
     /** 普通用户公开注册请求（设计 §4.1，无需邀请码）。 */
     data class RegisterUserRequest(
         val username: String,
@@ -73,11 +57,6 @@ class AuthService(
         val id: Long,
         val username: String,
         val role: Role,
-    )
-
-    /** 已注册用户凭邀请码补授项目创建资格（设计 §4.2）。 */
-    data class CreateProjectGrantRequest(
-        val inviteCode: String,
     )
 
     /** 邮箱+密码登录请求：account 可为用户名或邮箱，需额外校验邮箱验证码。 */
@@ -342,40 +321,6 @@ class AuthService(
         }
     }
 
-    /** 项目管理凭一次性邀请码注册：先校验邮箱验证码与密码强度，再建号 + 原子消费邀请码。 */
-    @Transactional
-    fun registerManager(req: RegisterManagerRequest, userAgent: String): RegisterManagerResponse {
-        verificationCodeService.verifyAndConsume(
-            VerificationCodeService.CodeContext(
-                scene = VerificationCodeService.Scene.REGISTER,
-                email = req.email.trim().lowercase(),
-                userId = null,
-                userAgent = userAgent,
-            ),
-            req.emailCode,
-        )
-        if (req.password != req.confirmPassword) {
-            throw ParamErrorException("两次密码不一致")
-        }
-        PasswordPolicy.validate(req.password, req.username, req.email.substringBefore('@'))
-        val user = userService.createUser(req.username, req.password, req.email, Role.USER).also {
-            it.emailVerifiedAt = LocalDateTime.now()
-            it.canCreateProject = false
-        }
-        userService.save(user)
-        if (!inviteCodeService.consume(req.inviteCode, user.id!!)) {
-            throw ParamErrorException("邀请码无效或已过期")
-        }
-        // 邀请码授予项目创建资格（设计 §4.2 新语义：邀请码 → canCreateProject，而非 PROJECT_MANAGER 角色）
-        user.canCreateProject = true
-        userService.save(user)
-        return RegisterManagerResponse(
-            id = user.id!!,
-            username = user.username,
-            role = user.role,
-        )
-    }
-
     /** 普通用户公开注册（设计 §4.1）：校验验证码 + 密码强度 + 用户名策略，建 USER 账号，邮箱视为已验证。 */
     @Transactional
     fun registerUser(req: RegisterUserRequest, userAgent: String): RegisterUserResponse {
@@ -402,20 +347,6 @@ class AuthService(
             username = user.username,
             role = Role.USER,
         )
-    }
-
-    /** 已注册用户凭一次性邀请码补授项目创建资格（设计 §4.2 新语义：邀请码 → canCreateProject）。 */
-    @Transactional
-    fun grantCreateProject(userId: Long, req: CreateProjectGrantRequest) {
-        val user = userService.findById(userId) ?: throw UserNotFoundException()
-        if (user.role == Role.SUPER_ADMIN) {
-            throw ParamErrorException("超级管理员无需补授项目创建资格")
-        }
-        if (!inviteCodeService.consume(req.inviteCode, userId)) {
-            throw ParamErrorException("邀请码无效或已过期")
-        }
-        user.canCreateProject = true
-        userService.save(user)
     }
 
     /** 修改密码（已登录）：校验旧密码 + 邮箱验证码（绑定本人 userId）+ 密码强度后更新。 */

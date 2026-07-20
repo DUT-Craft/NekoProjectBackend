@@ -115,9 +115,6 @@ neko:
     password: ${ADMIN_PASSWORD:password}
     # 初始管理员邮箱
     email: ${ADMIN_EMAIL:admin@nekobox.local}
-  invite:
-    # 邀请码有效期（秒）：604800 = 7d
-    ttl-seconds: ${INVITE_TTL_SECONDS:604800}
   project:
     # 单个项目经理最多持有的项目数
     max-per-manager: ${PROJECT_MAX_PER_MANAGER:10}
