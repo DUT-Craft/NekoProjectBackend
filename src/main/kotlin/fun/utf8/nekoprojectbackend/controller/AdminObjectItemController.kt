@@ -78,6 +78,8 @@ class AdminObjectItemController(
         @AuthenticationPrincipal admin: LoginUser,
         @RequestBody request: ObjectItemSaveRequest,
     ): ResponseEntity<Response> {
+        // 创建项目资格校验（设计 §2.2）：超管或 canCreateProject=true
+        accessService.ensureCanCreateProject(admin)
         val status = if (admin.role == Role.SUPER_ADMIN) {
             request.status ?: ObjectItemStatus.RECRUITING
         } else {

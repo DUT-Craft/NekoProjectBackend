@@ -36,7 +36,6 @@ data class ObjectItemSaveRequest(
     val leaderMcId: String? = null,
     val contactInformation: String? = null,
     val coverImageUrl: String? = null,
-    val controlPassword: String? = null,
 )
 
 data class ObjectItemBatchSaveRequest(
@@ -56,7 +55,6 @@ data class ObjectItemUpdateRequest(
     val leaderMcId: String? = null,
     val contactInformation: String? = null,
     val coverImageUrl: String? = null,
-    val controlPassword: String? = null,
 )
 
 data class ObjectItemBatchUpdateRequest(
@@ -111,7 +109,6 @@ data class ObjectItemResponse(
     val contactInformation: String?,
     val coverImageUrl: String?,
     val ownerId: Long?,
-    val hasControlPassword: Boolean,
 )
 
 data class ObjectItemPageVO(
@@ -345,11 +342,6 @@ class ObjectItemService(
                 MAX_COVER_IMAGE_URL_LENGTH,
                 "封面图地址不能超过 $MAX_COVER_IMAGE_URL_LENGTH 个字符",
             )
-            it.controlPassword = normalizeNullableText(
-                controlPassword,
-                MAX_CONTROL_PASSWORD_LENGTH,
-                "项目控制密码不能超过 $MAX_CONTROL_PASSWORD_LENGTH 个字符"
-            )
         }
     }
 
@@ -392,13 +384,6 @@ class ObjectItemService(
                 it,
                 MAX_COVER_IMAGE_URL_LENGTH,
                 "封面图地址不能超过 $MAX_COVER_IMAGE_URL_LENGTH 个字符"
-            )
-        }
-        request.controlPassword?.let {
-            controlPassword = normalizeNullableText(
-                it,
-                MAX_CONTROL_PASSWORD_LENGTH,
-                "项目控制密码不能超过 $MAX_CONTROL_PASSWORD_LENGTH 个字符"
             )
         }
     }
@@ -613,7 +598,6 @@ class ObjectItemService(
             contactInformation = contactInformation,
             coverImageUrl = coverImageUrl,
             ownerId = ownerId,
-            hasControlPassword = !controlPassword.isNullOrBlank(),
         )
     }
 
@@ -636,7 +620,6 @@ class ObjectItemService(
         const val MAX_LEADER_MC_ID_LENGTH = 64
         const val MAX_CONTACT_INFORMATION_LENGTH = 255
         const val MAX_COVER_IMAGE_URL_LENGTH = 512
-        const val MAX_CONTROL_PASSWORD_LENGTH = 255
         const val MAX_PAGE_SIZE = 1024
     }
 }

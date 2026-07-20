@@ -26,7 +26,6 @@ data class ObjectItemPublicResponse(
     val leaderMcId: String?,
     val contactInformation: String?,
     val coverImageUrl: String?,
-    val hasControlPassword: Boolean,
 )
 
 private fun ObjectItemResponse.toPublic() = ObjectItemPublicResponse(
@@ -41,7 +40,6 @@ private fun ObjectItemResponse.toPublic() = ObjectItemPublicResponse(
     leaderMcId = leaderMcId,
     contactInformation = contactInformation,
     coverImageUrl = coverImageUrl,
-    hasControlPassword = hasControlPassword,
 )
 
 private data class ObjectItemPage(
@@ -305,14 +303,16 @@ class ObjectItemController(
 
     @PostMapping("/{id}/join-applications")
     fun createJoinApplication(
+        @AuthenticationPrincipal user: LoginUser?,
         @PathVariable id: Int,
         @RequestBody request: JoinApplicationSaveRequest,
     ): ResponseEntity<Response> {
-        val application = joinApplicationService.create(id, request)
+        val application = joinApplicationService.create(id, request, applicantUserId = user?.id)
 
         data class Response(
             val id: Int?,
             val objectItemId: Int?,
+            val applicantUserId: Long?,
             val nickName: String?,
             val mcId: String?,
             val contact: String?,
@@ -327,6 +327,7 @@ class ObjectItemController(
         val rs = Response(
             id = application.id,
             objectItemId = application.objectItemId,
+            applicantUserId = application.applicantUserId,
             nickName = application.nickName,
             mcId = application.mcId,
             contact = application.contact,
@@ -339,6 +340,24 @@ class ObjectItemController(
         )
 
         return builder.ok().data(rs).build()
+    }
+
+    /** 申请人撤回自己的待处理加入申请（需登录，设计 §9.1）。 */
+    @PostMapping("/{id}/join-applications/{applicationId}/withdraw")
+    fun withdrawJoinApplication(
+        @AuthenticationPrincipal user: LoginUser,
+        @PathVariable id: Int,
+        @PathVariable applicationId: Int,
+    ): ResponseEntity<Response> {
+        val application = joinApplicationService.withdraw(id, applicationId, user.id)
+        operationLogService.record(
+            operator = user,
+            action = "JOIN_APPLICATION_WITHDRAW",
+            targetType = "JOIN_APPLICATION",
+            targetId = applicationId,
+            description = "撤回加入申请 #$applicationId",
+        )
+        return builder.ok().data(application).build()
     }
 
     private companion object {

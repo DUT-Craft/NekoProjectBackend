@@ -8,29 +8,12 @@ import `fun`.utf8.nekoprojectbackend.handlder.ResourceNotFoundException
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
 
-data class ObjectItemCommentManageStatusRequest(
-    val controlPassword: String = "",
-    val status: ObjectItemCommentStatus = ObjectItemCommentStatus.APPROVED,
-)
-
-/** 项目评论管理业务：凭项目控制密码查看/审核/删除评论，或管理员直接审核状态。 */
+/** 项目评论管理业务：统一 JWT 鉴权（项目 OWNER/MANAGER 或超管，由 AccessService.ensureCanManage 校验）。 */
 @Service
 class ObjectItemCommentManagementService(
-    private val objectItemManagementService: ObjectItemManagementService,
     private val objectItemCommentRepository: ObjectItemCommentRepository,
 ) {
 
-    @Transactional(readOnly = true)
-    fun list(
-        objectItemId: Int,
-        status: ObjectItemCommentStatus?,
-        request: ObjectItemManageVerifyRequest,
-    ): List<ObjectItemCommentResponse> {
-        verifyProject(objectItemId, request)
-        return listByAdmin(objectItemId, status)
-    }
-
-    /** 管理员查看项目评论：JWT 鉴权（由控制器层保证），无需项目控制密码。 */
     @Transactional(readOnly = true)
     fun listByAdmin(
         objectItemId: Int,
@@ -48,18 +31,6 @@ class ObjectItemCommentManagementService(
     }
 
     @Transactional
-    fun review(
-        objectItemId: Int,
-        commentId: Int,
-        request: ObjectItemCommentManageStatusRequest,
-    ): ObjectItemCommentResponse {
-        verifyProject(objectItemId, request.toVerifyRequest())
-        val comment = loadComment(commentId, objectItemId)
-        comment.status = request.status
-        return objectItemCommentRepository.save(comment).toResponse()
-    }
-
-    @Transactional
     fun reviewByAdmin(
         objectItemId: Int,
         commentId: Int,
@@ -71,19 +42,13 @@ class ObjectItemCommentManagementService(
     }
 
     @Transactional
-    fun delete(
+    fun deleteByAdmin(
         objectItemId: Int,
         commentId: Int,
-        request: ObjectItemManageVerifyRequest,
     ) {
-        verifyProject(objectItemId, request)
         val comment = loadComment(commentId, objectItemId)
         comment.status = ObjectItemCommentStatus.DELETED
         objectItemCommentRepository.save(comment)
-    }
-
-    private fun verifyProject(objectItemId: Int, request: ObjectItemManageVerifyRequest) {
-        objectItemManagementService.verify(objectItemId, request)
     }
 
     private fun loadComment(commentId: Int, objectItemId: Int): ObjectItemComment {
@@ -97,9 +62,6 @@ class ObjectItemCommentManagementService(
         }
         return comment
     }
-
-    private fun ObjectItemCommentManageStatusRequest.toVerifyRequest() =
-        ObjectItemManageVerifyRequest(controlPassword = controlPassword)
 
     private fun ObjectItemComment.toResponse(): ObjectItemCommentResponse {
         return ObjectItemCommentResponse(

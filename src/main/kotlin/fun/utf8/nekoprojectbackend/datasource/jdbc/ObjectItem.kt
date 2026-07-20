@@ -64,12 +64,14 @@ class ObjectItem {
     @Column(name = "cover_image_url", length = 512)
     var coverImageUrl: String? = null
 
-    @Column(name = "control_password", length = 255)
-    var controlPassword: String? = null
-
     /** 归属项目管理的用户 ID（users.id）；为空表示未分配，仅总管理可维护。 */
     @Column(name = "owner_id")
     var ownerId: Long? = null
+
+    /** 项目创建者用户 ID（users.id）；与 ownerId 区别——创建者永远不变，归属管理者可转交。
+     *  迁移期回填为 ownerId；匿名投稿的历史行可为 null（标记为「历史匿名」，设计 §14.12）。 */
+    @Column(name = "created_by")
+    var createdBy: Long? = null
 }
 
 /** 招募需求项：岗位技能、人数、说明（嵌入项目条目集合表）。 */

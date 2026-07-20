@@ -4,6 +4,7 @@ import `fun`.utf8.nekoprojectbackend.datasource.jdbc.JoinApplication
 import `fun`.utf8.nekoprojectbackend.datasource.jdbc.JoinApplicationRepository
 import `fun`.utf8.nekoprojectbackend.datasource.jdbc.JoinApplicationStatus
 import `fun`.utf8.nekoprojectbackend.datasource.jdbc.ObjectItemRepository
+import `fun`.utf8.nekoprojectbackend.handlder.ForbiddenException
 import `fun`.utf8.nekoprojectbackend.handlder.ParamErrorException
 import `fun`.utf8.nekoprojectbackend.handlder.ResourceNotFoundException
 import org.springframework.stereotype.Service
@@ -21,6 +22,7 @@ data class JoinApplicationSaveRequest(
 data class JoinApplicationResponse(
     val id: Int?,
     val objectItemId: Int?,
+    val applicantUserId: Long? = null,
     val nickName: String?,
     val mcId: String?,
     val contact: String?,
@@ -40,12 +42,25 @@ class JoinApplicationService(
 ) {
 
     @Transactional
-    fun create(objectItemId: Int, request: JoinApplicationSaveRequest): JoinApplicationResponse {
+    fun create(
+        objectItemId: Int,
+        request: JoinApplicationSaveRequest,
+        applicantUserId: Long? = null,
+    ): JoinApplicationResponse {
         val resolvedItemId = requirePositiveItemId(objectItemId)
         ensureObjectItemExists(resolvedItemId)
 
+        // 同一用户对同一项目已有待处理申请则拒绝重复（设计 §9.1）
+        if (applicantUserId != null) {
+            joinApplicationRepository
+                .findByObjectItemIdAndStatus(resolvedItemId, JoinApplicationStatus.PENDING)
+                .firstOrNull { it.applicantUserId == applicantUserId }
+                ?.let { throw ParamErrorException("你已有一个待处理的申请") }
+        }
+
         val entity = JoinApplication().also {
             it.objectItemId = resolvedItemId
+            it.applicantUserId = applicantUserId
             it.nickName = requireText(
                 request.nickName,
                 "申请人昵称不能为空",
@@ -70,6 +85,24 @@ class JoinApplicationService(
             it.status = JoinApplicationStatus.PENDING
         }
         return joinApplicationRepository.save(entity).toResponse()
+    }
+
+    /** 申请人撤回自己的待处理申请（设计 §9.1，状态置 WITHDRAWN）。 */
+    @Transactional
+    fun withdraw(objectItemId: Int, applicationId: Int, applicantUserId: Long): JoinApplicationResponse {
+        val application = joinApplicationRepository.findById(applicationId)
+            .orElseThrow { ResourceNotFoundException("加入申请不存在") }
+        if (application.objectItemId != objectItemId) {
+            throw ResourceNotFoundException("加入申请不存在")
+        }
+        if (application.applicantUserId != applicantUserId) {
+            throw ForbiddenException("只能撤回自己的申请")
+        }
+        if (application.status != JoinApplicationStatus.PENDING) {
+            throw ParamErrorException("只能撤回待处理的申请")
+        }
+        application.status = JoinApplicationStatus.WITHDRAWN
+        return joinApplicationRepository.save(application).toResponse()
     }
 
     private fun ensureObjectItemExists(objectItemId: Int) {
@@ -117,6 +150,7 @@ class JoinApplicationService(
         return JoinApplicationResponse(
             id = id,
             objectItemId = objectItemId,
+            applicantUserId = applicantUserId,
             nickName = nickName,
             mcId = mcId,
             contact = contact,

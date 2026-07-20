@@ -18,14 +18,51 @@ class TokenStore(
     private val redis: StringRedisTemplate,
 ) {
 
-    fun saveAccess(jti: String, userId: Long, ttl: Duration) {
-        redis.opsForValue().set(accessKey(jti), userId.toString(), ttl)
+    /** 会话元数据（供 GET /api/auth/sessions 展示设备列表）。issuedAt 为 epoch 毫秒。 */
+    data class SessionInfo(
+        val jti: String,
+        val userId: Long,
+        val userAgent: String?,
+        val ip: String?,
+        val issuedAt: Long?,
+    )
+
+    /** access value 以 `userId|ua|ip|issuedAt` 存储，既保留踢人所需的归属，又携带会话元数据。 */
+    fun saveAccess(jti: String, userId: Long, userAgent: String, ip: String, ttl: Duration) {
+        val ua = userAgent.take(MAX_UA_LEN).replace("|", " ")
+        val safeIp = ip.replace("|", " ")
+        val value = "$userId|$ua|$safeIp|${System.currentTimeMillis()}"
+        redis.opsForValue().set(accessKey(jti), value, ttl)
         redis.opsForSet().add(sessionIndexKey(userId), jti)
+    }
+
+    /** 列出用户当前全部有效会话（access 仍在白名单中的）。 */
+    fun listSessions(userId: Long): List<SessionInfo> {
+        val jtis = redis.opsForSet().members(sessionIndexKey(userId)) ?: emptySet()
+        return jtis.mapNotNull { jti ->
+            val value = redis.opsForValue().get(accessKey(jti)) ?: return@mapNotNull null
+            val parts = value.split("|", limit = 4)
+            SessionInfo(
+                jti = jti,
+                userId = parts.getOrNull(0)?.toLongOrNull() ?: userId,
+                userAgent = parts.getOrNull(1)?.ifBlank { null },
+                ip = parts.getOrNull(2)?.ifBlank { null },
+                issuedAt = parts.getOrNull(3)?.toLongOrNull(),
+            )
+        }
     }
 
     fun isAccessValid(jti: String): Boolean = redis.hasKey(accessKey(jti))
 
+    /**
+     * 登出指定会话：先校验该 jti 确属该 userId（防止越权登出他人会话，设计 §12 修正），
+     * 再删除 access key 与会话索引项。归属不符则静默 no-op（不暴露 jti 是否存在）。
+     */
     fun invalidateAccess(jti: String, userId: Long) {
+        val owned = redis.opsForSet().isMember(sessionIndexKey(userId), jti) == true
+        if (!owned) {
+            return
+        }
         redis.delete(accessKey(jti))
         redis.opsForSet().remove(sessionIndexKey(userId), jti)
     }
@@ -68,4 +105,8 @@ class TokenStore(
     private fun refreshKey(jti: String) = "auth:refresh:$jti"
     private fun sessionIndexKey(userId: Long) = "auth:user:$userId:sessions"
     private fun refreshIndexKey(userId: Long) = "auth:user:$userId:refreshes"
+
+    private companion object {
+        const val MAX_UA_LEN = 160
+    }
 }

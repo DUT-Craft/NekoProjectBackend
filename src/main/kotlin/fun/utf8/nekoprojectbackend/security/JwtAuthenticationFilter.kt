@@ -59,7 +59,7 @@ class JwtAuthenticationFilter(
 
     private fun toPrincipal(claims: Claims): LoginUser {
         val roleName = claims.get(CLAIM_ROLE, String::class.java)
-        val role = runCatching { roleName?.let { Role.valueOf(it) } }.getOrNull() ?: Role.PROJECT_MANAGER
+        val role = runCatching { roleName?.let { Role.valueOf(it) } }.getOrNull() ?: Role.USER
         return LoginUser(
             id = claims.subject.toLong(),
             username = claims.get(CLAIM_USERNAME, String::class.java),

@@ -72,6 +72,9 @@ neko:
       http-only: ${COOKIE_HTTP_ONLY:true}
       # SameSite 策略：Lax（同站）/ None（跨站，需 secure）/ Strict
       same-site: ${COOKIE_SAME_SITE:Lax}
+    # 可信反代开关（设计 §5.2 修正）：true 时 clientIp 才采信 X-Forwarded-For / X-Real-IP。
+    # 未部署反代时保持 false，用 remoteAddr，防客户端伪造 XFF 绕过 IP 维度限流。
+    trusted-proxy: ${NEKO_TRUSTED_PROXY:false}
   mail:
     verification:
       # 验证码有效期（秒）：600 = 10min

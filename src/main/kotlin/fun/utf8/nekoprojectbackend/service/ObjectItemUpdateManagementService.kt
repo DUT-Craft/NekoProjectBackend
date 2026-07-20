@@ -9,7 +9,6 @@ import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
 
 data class ObjectItemUpdateManageCreateRequest(
-    val controlPassword: String = "",
     val title: String = "",
     val content: String = "",
     val imageUrl: String? = null,
@@ -17,31 +16,18 @@ data class ObjectItemUpdateManageCreateRequest(
 )
 
 data class ObjectItemUpdateManageUpdateRequest(
-    val controlPassword: String = "",
     val title: String? = null,
     val content: String? = null,
     val imageUrl: String? = null,
     val status: ObjectItemUpdateStatus? = null,
 )
 
-/** 项目动态管理业务：凭项目控制密码创建/更新/删除动态，或管理员直接审核状态。 */
+/** 项目动态管理业务：统一 JWT 鉴权（项目 OWNER/MANAGER 或超管，由 AccessService.ensureCanManage 校验）。 */
 @Service
 class ObjectItemUpdateManagementService(
-    private val objectItemManagementService: ObjectItemManagementService,
     private val objectItemUpdateRepository: ObjectItemUpdateRepository,
 ) {
 
-    @Transactional(readOnly = true)
-    fun list(
-        objectItemId: Int,
-        status: ObjectItemUpdateStatus?,
-        request: ObjectItemManageVerifyRequest,
-    ): List<ObjectItemUpdateResponse> {
-        verifyProject(objectItemId, request)
-        return listByAdmin(objectItemId, status)
-    }
-
-    /** 管理员查看项目动态：JWT 鉴权（由控制器层保证），无需项目控制密码。 */
     @Transactional(readOnly = true)
     fun listByAdmin(
         objectItemId: Int,
@@ -58,16 +44,6 @@ class ObjectItemUpdateManagementService(
             .toList()
     }
 
-    @Transactional
-    fun create(
-        objectItemId: Int,
-        request: ObjectItemUpdateManageCreateRequest,
-    ): ObjectItemUpdateResponse {
-        verifyProject(objectItemId, request.toVerifyRequest())
-        return createByAdmin(objectItemId, request)
-    }
-
-    /** 管理员发布项目动态：JWT 鉴权，无需项目控制密码。 */
     @Transactional
     fun createByAdmin(
         objectItemId: Int,
@@ -93,17 +69,6 @@ class ObjectItemUpdateManagementService(
     }
 
     @Transactional
-    fun update(
-        objectItemId: Int,
-        updateId: Int,
-        request: ObjectItemUpdateManageUpdateRequest,
-    ): ObjectItemUpdateResponse {
-        verifyProject(objectItemId, request.toVerifyRequest())
-        return updateByAdmin(objectItemId, updateId, request)
-    }
-
-    /** 管理员修改项目动态：JWT 鉴权，无需项目控制密码。空值字段表示不修改。 */
-    @Transactional
     fun updateByAdmin(
         objectItemId: Int,
         updateId: Int,
@@ -125,17 +90,7 @@ class ObjectItemUpdateManagementService(
         return objectItemUpdateRepository.save(update).toResponse()
     }
 
-    @Transactional
-    fun delete(
-        objectItemId: Int,
-        updateId: Int,
-        request: ObjectItemManageVerifyRequest,
-    ) {
-        verifyProject(objectItemId, request)
-        deleteByAdmin(objectItemId, updateId)
-    }
-
-    /** 管理员删除项目动态（软删除置 DELETED）：JWT 鉴权，无需项目控制密码。 */
+    /** 删除项目动态（软删除置 DELETED）：JWT 鉴权。 */
     @Transactional
     fun deleteByAdmin(
         objectItemId: Int,
@@ -146,7 +101,7 @@ class ObjectItemUpdateManagementService(
         objectItemUpdateRepository.save(update)
     }
 
-    /** 把编辑请求的非空字段应用到动态实体，供项目方 / 管理员更新复用。 */
+    /** 把编辑请求的非空字段应用到动态实体。 */
     private fun applyUpdateFields(update: ObjectItemUpdate, request: ObjectItemUpdateManageUpdateRequest) {
         request.title?.let {
             update.title = requireText(
@@ -167,10 +122,6 @@ class ObjectItemUpdateManagementService(
         request.status?.let { update.status = it }
     }
 
-    private fun verifyProject(objectItemId: Int, request: ObjectItemManageVerifyRequest) {
-        objectItemManagementService.verify(objectItemId, request)
-    }
-
     private fun loadUpdate(updateId: Int, objectItemId: Int): ObjectItemUpdate {
         if (updateId <= 0) {
             throw ParamErrorException("项目动态 ID 必须大于 0")
@@ -182,12 +133,6 @@ class ObjectItemUpdateManagementService(
         }
         return update
     }
-
-    private fun ObjectItemUpdateManageCreateRequest.toVerifyRequest() =
-        ObjectItemManageVerifyRequest(controlPassword = controlPassword)
-
-    private fun ObjectItemUpdateManageUpdateRequest.toVerifyRequest() =
-        ObjectItemManageVerifyRequest(controlPassword = controlPassword)
 
     private fun requireText(value: String, blankMessage: String): String {
         val normalized = value.trim()

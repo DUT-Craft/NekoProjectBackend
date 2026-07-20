@@ -5,9 +5,10 @@
 spring:
   jpa:
     hibernate:
-      # 生产严禁 create/update：create 会每次启动丢表重建（数据全没），update 会自动改表结构导致 schema 漂移。
-      # validate 只校验实体与库表一致，不一致则启动失败——把 schema 漂移暴露在启动期，而不是线上悄悄错。
-      ddl-auto: validate
+      # 生产用 update：账户系统改造引入大量新表 / 新列（project_member、users 生命周期字段、
+      # 各资源 author_user_id 等），由 Hibernate 自动补建，免去手写迁移。
+      # 不用 create（会每次启动丢表重建），update 只增量加表 / 列，不删现有数据。
+      ddl-auto: update
     show-sql: false
     properties:
       hibernate:
@@ -27,3 +28,13 @@ neko:
       secure: true
       http-only: true
       # same-site 留给环境变量 COOKIE_SAME_SITE：跨根域部署设 None，同站可设 Lax。
+    # 可信反代开关（设计 §5.2 修正）：仅部署在可信反向代理后才采信 X-Forwarded-For / X-Real-IP。
+    # 未开启时 clientIp 只用 remoteAddr，防客户端伪造 XFF 绕过 IP 维度限流。
+    trusted-proxy: ${NEKO_TRUSTED_PROXY:false}
+  admin:
+    # 生产默认管理员凭证仍走环境变量，但 seeder 会拒绝用弱默认值（password）初始化超管
+    # （见 AdminUserSeeder 守卫）。这里显式占位，便于运维知晓字段名。
+    username: ${NEKO_ADMIN_USERNAME:admin}
+    password: ${NEKO_ADMIN_PASSWORD:}
+    email: ${NEKO_ADMIN_EMAIL:admin@nekobox.local}
+

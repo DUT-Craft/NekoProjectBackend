@@ -12,7 +12,7 @@ import java.time.LocalDateTime
 import java.util.Locale
 
 /**
- * 应用就绪后通过 JPA 写入一批模拟数据（用户 / 想法 / 项目 / 评论 / 动态 / 申请）。
+ * 应用就绪后通过 JPA 写入一批模拟数据（用户 / 想法 / 项目 / 评论 / 动态 / 申请 + 项目成员关系）。
  *
  * - 由 `neko.seed.enabled` 控制开关，默认开启；
  * - 仅在用户表为空时执行，避免重复启动写脏数据；
@@ -27,6 +27,7 @@ class DataSeeder(
     private val commentRepository: ObjectItemCommentRepository,
     private val updateRepository: ObjectItemUpdateRepository,
     private val joinApplicationRepository: JoinApplicationRepository,
+    private val projectMemberRepository: ProjectMemberRepository,
     private val passwordEncoder: PasswordEncoder,
     private val transactionTemplate: TransactionTemplate,
     @Value("\${neko.seed.enabled:true}") private val enabled: Boolean,
@@ -56,17 +57,21 @@ class DataSeeder(
 
     private fun seedInternal() {
         val password = passwordEncoder.encode(DEFAULT_PASSWORD)!!
+        val now = LocalDateTime.now()
 
         val users = DEMO_USERS.map { (username, email, nickname, status, role) ->
             userRepository.save(
-                User(
-                    username = username,
-                    password = password,
-                    email = email,
-                    nickname = nickname,
-                    status = status,
-                    role = role,
-                )
+                User().apply {
+                    this.username = username
+                    this.password = password
+                    this.email = email
+                    this.nickname = nickname
+                    this.status = status
+                    this.role = role
+                    // 历史演示账号视为已验证邮箱；设计 §2.2 下拥有项目创建资格
+                    this.emailVerifiedAt = now
+                    this.canCreateProject = true
+                }
             )
         }
         val nicknames = users.map { it.nickname }
@@ -87,9 +92,10 @@ class DataSeeder(
         // 全局标签字典（分组节点 + 可选叶子 + 独立标签），供 Cascader 与项目关联
         val tagByName = seedTags()
 
-        // 项目条目（含招募需求与标签）
+        // 项目条目（含招募需求与标签）+ OWNER 成员关系（JPA 自动建表，不写迁移）
         val objectItems = DEMO_OBJECTS.mapIndexed { index, def ->
-            objectItemRepository.save(
+            val owner = users[index % users.size]
+            val item = objectItemRepository.save(
                 ObjectItem().apply {
                     title = def.title
                     introduction = def.introduction
@@ -98,8 +104,8 @@ class DataSeeder(
                     leader = def.leader
                     leaderMcId = def.leaderMcId
                     contactInformation = def.contact
-                    controlPassword = password
-                    ownerId = users[index % users.size].id
+                    ownerId = owner.id
+                    createdBy = owner.id
                     tags = def.tags.mapNotNull { name -> tagByName[name.trim().lowercase(Locale.ROOT)] }
                         .toCollection(LinkedHashSet())
                     needMembers = def.needMembers.map { (skill, number, ctx) ->
@@ -111,6 +117,17 @@ class DataSeeder(
                     }.toMutableList()
                 }
             )
+            // 创建者为项目 OWNER 成员
+            projectMemberRepository.save(
+                ProjectMember().apply {
+                    projectId = item.id
+                    userId = owner.id
+                    role = ProjectRole.OWNER
+                    status = MemberStatus.ACTIVE
+                    joinedAt = now
+                }
+            )
+            item
         }
 
         // 项目评论
@@ -196,10 +213,10 @@ class DataSeeder(
         const val DEFAULT_PASSWORD = "nekobox123"
 
         val DEMO_USERS = listOf(
-            SeedUser("nyaa", "nyaa@nekobox.local", "Nyaako", Status.ACTIVE, Role.PROJECT_MANAGER),
-            SeedUser("shiro", "shiro@nekobox.local", "Shiro", Status.ACTIVE, Role.PROJECT_MANAGER),
-            SeedUser("kuro", "kuro@nekobox.local", "KuroNeko", Status.ACTIVE, Role.PROJECT_MANAGER),
-            SeedUser("frozen", "frozen@nekobox.local", "Frozen", Status.BANNED, Role.PROJECT_MANAGER),
+            SeedUser("nyaa", "nyaa@nekobox.local", "Nyaako", Status.ACTIVE, Role.USER),
+            SeedUser("shiro", "shiro@nekobox.local", "Shiro", Status.ACTIVE, Role.USER),
+            SeedUser("kuro", "kuro@nekobox.local", "KuroNeko", Status.ACTIVE, Role.USER),
+            SeedUser("frozen", "frozen@nekobox.local", "Frozen", Status.BANNED, Role.USER),
         )
 
         val DEMO_MINDS = listOf(

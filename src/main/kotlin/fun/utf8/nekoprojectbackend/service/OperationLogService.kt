@@ -1,5 +1,7 @@
 package `fun`.utf8.nekoprojectbackend.service
 
+import `fun`.utf8.nekoprojectbackend.datasource.jdbc.AuditLog
+import `fun`.utf8.nekoprojectbackend.datasource.jdbc.AuditLogRepository
 import `fun`.utf8.nekoprojectbackend.security.LoginUser
 import jakarta.annotation.PostConstruct
 import jakarta.annotation.PreDestroy
@@ -33,6 +35,7 @@ import java.util.concurrent.TimeUnit
  */
 @Service
 class OperationLogService(
+    private val auditLogRepository: AuditLogRepository,
     @Value("\${neko.audit.log-path:./logs/operation.log}") private val logPath: String,
     @Value("\${neko.audit.max-size-mb:50}") private val maxSizeMb: Long,
     @Value("\${neko.audit.max-archives:30}") private val maxArchives: Int,
@@ -79,10 +82,36 @@ class OperationLogService(
         val (opId, opName, opRole) = resolveOperator(operatorId, operatorName, operatorRole)
         val ip = currentIp()
         val line = buildJson(opId, opName, opRole, action, targetType, targetId, description, ip, success, error)
+        // 双写：异步写文件（兜底）+ 异步落库（可查询，设计 §11 / §13）
         writer.execute {
             runCatching { appendLine(line) }
                 .onFailure { appLog.error("写入操作日志失败: ${it.message}", it) }
         }
+        writer.execute {
+            runCatching { persistAudit(opId, opName, opRole, action, targetType, targetId, description, ip, success, error) }
+                .onFailure { appLog.warn("审计落库失败: ${it.message}") }
+        }
+    }
+
+    private fun persistAudit(
+        operatorId: Long?, operatorName: String?, operatorRole: String?,
+        action: String, targetType: String?, targetId: Any?, description: String,
+        ip: String?, success: Boolean, error: String?,
+    ) {
+        auditLogRepository.save(
+            AuditLog().apply {
+                this.operatorId = operatorId
+                this.operatorName = operatorName
+                this.operatorRole = operatorRole
+                this.action = action
+                this.targetType = targetType
+                this.targetId = targetId?.toString()
+                this.description = description.take(512)
+                this.ip = ip
+                this.success = success
+                this.error = error?.take(512)
+            }
+        )
     }
 
     /** 便捷重载：直接传已登录的 [LoginUser]。 */

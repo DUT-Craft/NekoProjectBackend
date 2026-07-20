@@ -21,6 +21,10 @@ class JoinApplication {
     @Column(name = "object_item_id", nullable = false)
     var objectItemId: Int? = null
 
+    /** 申请人用户 ID（users.id）；匿名提交的历史行可为 null（标记为「历史匿名」，设计 §14.12）。 */
+    @Column(name = "applicant_user_id")
+    var applicantUserId: Long? = null
+
     @Column(name = "nick_name", nullable = false, length = 64)
     var nickName: String? = null
 
@@ -63,7 +67,7 @@ class JoinApplication {
     }
 }
 
-/** 申请处理状态：待处理 / 已联系 / 已接受 / 已拒绝。 */
+/** 申请处理状态：待处理 / 已联系 / 已接受 / 已拒绝 / 已撤回（用户主动撤回，设计 §9.1）。 */
 enum class JoinApplicationStatus {
     PENDING,
 
@@ -72,4 +76,6 @@ enum class JoinApplicationStatus {
     ACCEPTED,
 
     REJECTED,
+
+    WITHDRAWN,
 }

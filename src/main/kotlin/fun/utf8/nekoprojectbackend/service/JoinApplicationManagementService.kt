@@ -8,34 +8,21 @@ import `fun`.utf8.nekoprojectbackend.handlder.ResourceNotFoundException
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
 
-data class JoinApplicationRejectRequest(
-    val controlPassword: String = "",
-    val rejectReason: String? = null,
-)
-
-/** 管理员拒绝加入申请请求体：JWT 鉴权下无需项目控制密码，仅携带可选拒绝理由。 */
+/** 管理员拒绝加入申请请求体：JWT 鉴权，仅携带可选拒绝理由。 */
 data class JoinApplicationAdminRejectRequest(
     val rejectReason: String? = null,
 )
 
-/** 加入申请管理业务：凭项目控制密码查看/接受/拒绝申请，或管理员（JWT）直接处理。 */
+/**
+ * 加入申请管理业务：统一走 JWT 鉴权（项目 OWNER/MANAGER 或超管，由 AccessService.ensureCanManage 校验）。
+ * 接受申请时同事务创建 ACTIVE MEMBER（设计 §9.1）。
+ */
 @Service
 class JoinApplicationManagementService(
-    private val objectItemManagementService: ObjectItemManagementService,
     private val joinApplicationRepository: JoinApplicationRepository,
+    private val projectMemberService: ProjectMemberService,
 ) {
 
-    @Transactional(readOnly = true)
-    fun list(
-        objectItemId: Int,
-        status: JoinApplicationStatus?,
-        request: ObjectItemManageVerifyRequest,
-    ): List<JoinApplicationResponse> {
-        verifyProject(objectItemId, request)
-        return listByAdmin(objectItemId, status)
-    }
-
-    /** 管理员查看加入申请：JWT 鉴权（由控制器层保证），无需项目控制密码。 */
     @Transactional(readOnly = true)
     fun listByAdmin(
         objectItemId: Int,
@@ -52,17 +39,7 @@ class JoinApplicationManagementService(
             .toList()
     }
 
-    @Transactional
-    fun accept(
-        objectItemId: Int,
-        applicationId: Int,
-        request: ObjectItemManageVerifyRequest,
-    ): JoinApplicationResponse {
-        verifyProject(objectItemId, request)
-        return acceptByAdmin(objectItemId, applicationId)
-    }
-
-    /** 管理员同意加入申请：JWT 鉴权，无需项目控制密码。 */
+    /** 同意加入申请：JWT 鉴权（由控制器层保证），同事务创建 ACTIVE MEMBER（设计 §9.1）。 */
     @Transactional
     fun acceptByAdmin(
         objectItemId: Int,
@@ -70,20 +47,13 @@ class JoinApplicationManagementService(
     ): JoinApplicationResponse {
         val application = loadApplication(applicationId, objectItemId)
         application.status = JoinApplicationStatus.ACCEPTED
-        return joinApplicationRepository.save(application).toResponse()
+        val saved = joinApplicationRepository.save(application)
+        // 同事务创建成员关系；匿名历史申请（applicantUserId=null）跳过
+        saved.applicantUserId?.let { projectMemberService.upsertMemberOnAccept(objectItemId, it) }
+        return saved.toResponse()
     }
 
-    @Transactional
-    fun reject(
-        objectItemId: Int,
-        applicationId: Int,
-        request: JoinApplicationRejectRequest,
-    ): JoinApplicationResponse {
-        verifyProject(objectItemId, ObjectItemManageVerifyRequest(request.controlPassword))
-        return rejectByAdmin(objectItemId, applicationId, request.rejectReason)
-    }
-
-    /** 管理员拒绝加入申请：JWT 鉴权，无需项目控制密码。 */
+    /** 拒绝加入申请：JWT 鉴权。 */
     @Transactional
     fun rejectByAdmin(
         objectItemId: Int,
@@ -104,10 +74,6 @@ class JoinApplicationManagementService(
         return normalized
     }
 
-    private fun verifyProject(objectItemId: Int, request: ObjectItemManageVerifyRequest) {
-        objectItemManagementService.verify(objectItemId, request)
-    }
-
     private fun loadApplication(applicationId: Int, objectItemId: Int): JoinApplication {
         if (applicationId <= 0) {
             throw ParamErrorException("加入申请 ID 必须大于 0")
@@ -124,6 +90,7 @@ class JoinApplicationManagementService(
         return JoinApplicationResponse(
             id = id,
             objectItemId = objectItemId,
+            applicantUserId = applicantUserId,
             nickName = nickName,
             mcId = mcId,
             contact = contact,
