@@ -22,4 +22,12 @@ interface UserRepository : JpaRepository<User, Long> {
 
     /** 当前活跃的超级管理员数量：用于「最后一个超级管理员」保护（设计 §11）。 */
     fun countByRoleAndStatus(role: Role, status: Status): Long
+
+    /** 关键字模糊查（用户名 / 昵称 / 邮箱，大小写不敏感）：管理端用户列表搜索用。
+     *  keyword 为空时返回全量。LIKE 已含两侧 %，调用方传原始关键字即可。 */
+    fun findByUsernameContainingIgnoreCaseOrNicknameContainingIgnoreCaseOrEmailContainingIgnoreCase(
+        username: String,
+        nickname: String,
+        email: String,
+    ): List<User>
 }

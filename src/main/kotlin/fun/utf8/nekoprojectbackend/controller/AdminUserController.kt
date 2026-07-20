@@ -79,6 +79,41 @@ class AdminUserController(
         return builder.ok().data(rs).build()
     }
 
+    /** 总管理列出全部用户（用户管理页用）：支持 keyword 模糊搜用户名/昵称/邮箱。仅总管理可调用。 */
+    @GetMapping
+    fun listUsers(
+        @AuthenticationPrincipal admin: LoginUser,
+        @RequestParam(required = false) keyword: String?,
+    ): ResponseEntity<Response> {
+        accessService.requireSuperAdmin(admin)
+        val users = userService.listAll(keyword)
+
+        data class UserSummary(
+            val id: Long,
+            val username: String,
+            val nickname: String,
+            val email: String,
+            val role: Role,
+            val status: Status,
+            val canCreateProject: Boolean,
+            val createdAt: LocalDateTime?,
+        )
+
+        val rs = users.map {
+            UserSummary(
+                id = it.id!!,
+                username = it.username,
+                nickname = it.nickname,
+                email = it.email,
+                role = it.role,
+                status = it.status,
+                canCreateProject = it.role == Role.SUPER_ADMIN || it.canCreateProject,
+                createdAt = it.createdAt,
+            )
+        }
+        return builder.ok().data(rs).build()
+    }
+
     /** 总管理分配项目时下拉用：返回可归属项目的全部账号（项目管理 + 总管理，含角色标签）。仅总管理可调用。 */
     @GetMapping("/managers")
     fun listManagers(@AuthenticationPrincipal admin: LoginUser): ResponseEntity<Response> {

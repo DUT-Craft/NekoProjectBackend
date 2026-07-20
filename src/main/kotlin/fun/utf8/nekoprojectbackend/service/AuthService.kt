@@ -242,6 +242,10 @@ class AuthService(
         return issueTokens(user, userAgent, ip)
     }
 
+    /** 取当前登录用户完整信息（/auth/me 用）：重读 DB，返回最新 email / role / canCreateProject。 */
+    fun currentUser(userId: Long): User =
+        userService.findById(userId) ?: throw UserNotFoundException()
+
     /** 发送验证码：按场景校验前置条件 + 限流，生成后发邮件。CHANGE_PASSWORD 需登录态（绑定 userId）。 */
     fun sendVerificationCode(req: SendCodeRequest, userAgent: String, loginUser: LoginUser? = null) {
         val scene = req.scene

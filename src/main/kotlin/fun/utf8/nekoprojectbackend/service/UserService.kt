@@ -47,6 +47,18 @@ class UserService(
         return userRepository.findByCanCreateProjectTrueOrRole(canCreateProject = true, role = Role.SUPER_ADMIN)
     }
 
+    /** 全量用户列表（管理端用）：keyword 为空返回全部，否则按用户名/昵称/邮箱模糊查。 */
+    fun listAll(keyword: String?): List<User> {
+        val key = keyword?.trim()?.takeIf { it.isNotBlank() }
+        return if (key == null) {
+            userRepository.findAll()
+        } else {
+            userRepository.findByUsernameContainingIgnoreCaseOrNicknameContainingIgnoreCaseOrEmailContainingIgnoreCase(
+                key, key, key,
+            )
+        }
+    }
+
     /** 当前活跃的超级管理员数量（最后一个超管保护，设计 §11）。 */
     fun countActiveSuperAdmins(): Long =
         userRepository.countByRoleAndStatus(Role.SUPER_ADMIN, Status.ACTIVE)

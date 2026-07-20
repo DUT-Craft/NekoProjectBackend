@@ -368,17 +368,27 @@ class AuthController(
     }
 
     @GetMapping("/me")
-    fun me(@AuthenticationPrincipal user: LoginUser): ResponseEntity<Response> {
+    fun me(
+        @AuthenticationPrincipal user: LoginUser,
+        request: HttpServletRequest,
+    ): ResponseEntity<Response> {
+        // 重读 DB 取 email / canCreateProject：LoginUser 只在签发时快照角色，不携带这些字段；
+        // 授权资格（canCreateProject）可被管理员随时改，必须实时读，避免凭旧 token 越权创建项目。
+        val fullUser = authService.currentUser(user.id)
         data class CurrentUser(
             val id: Long,
             val username: String,
+            val email: String,
             val role: Role,
+            val canCreateProject: Boolean,
         )
 
         val rs = CurrentUser(
             id = user.id,
             username = user.username,
-            role = user.role,
+            email = fullUser.email,
+            role = fullUser.role,
+            canCreateProject = fullUser.role == Role.SUPER_ADMIN || fullUser.canCreateProject,
         )
         return builder.ok().data(rs).build()
     }
