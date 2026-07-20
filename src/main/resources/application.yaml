@@ -261,6 +261,9 @@ spring:
       database: ${REDIS_DATABASE:4}
       # 连接 / 命令超时
       timeout: ${REDIS_TIMEOUT:10000ms}
+      # 启动时是否 FLUSHDB 清空 Redis（RedisCleanupConfig 读取）。
+      # 本地 / 测试重置数据用 true；生产务必设 false，否则每次启动清空线上缓存。
+      clear-on-startup: ${REDIS_CLEAR_ON_STARTUP:true}
 
 # ───────────────────────── 日志 ─────────────────────────
 logging:
