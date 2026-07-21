@@ -69,10 +69,16 @@ class ObjectItemController(
         return builder.ok().data(count).build()
     }
 
+    /** 公开投稿：校验创建资格（§2.2）后，以当前用户为归属、强制 PENDING 待审（设计 §2.2 / §14）。 */
     @PostMapping
-    fun save(@RequestBody request: ObjectItemSaveRequest): ResponseEntity<Response> {
-        val item = objectItemService.save(request)
+    fun save(
+        @AuthenticationPrincipal user: LoginUser,
+        @RequestBody request: ObjectItemSaveRequest,
+    ): ResponseEntity<Response> {
+        accessService.ensureCanCreateProject(user)
+        val item = objectItemService.saveOwned(request, user.id, ObjectItemStatus.PENDING)
         operationLogService.record(
+            operator = user,
             action = "PROJECT_CREATE",
             targetType = "PROJECT",
             targetId = item.id,
@@ -81,9 +87,21 @@ class ObjectItemController(
         return builder.ok().data(item.toPublic()).build()
     }
 
+    /** 公开批量投稿：校验创建资格后，逐条归属当前用户、强制 PENDING（整批同事务，任一条失败回滚）。 */
     @PostMapping("/batch")
-    fun saveBatch(@RequestBody request: ObjectItemBatchSaveRequest): ResponseEntity<Response> {
-        val items = objectItemService.saveBatch(request.items)
+    fun saveBatch(
+        @AuthenticationPrincipal user: LoginUser,
+        @RequestBody request: ObjectItemBatchSaveRequest,
+    ): ResponseEntity<Response> {
+        accessService.ensureCanCreateProject(user)
+        val items = objectItemService.saveBatchOwned(request.items, user.id, ObjectItemStatus.PENDING)
+        operationLogService.record(
+            operator = user,
+            action = "PROJECT_CREATE_BATCH",
+            targetType = "PROJECT",
+            targetId = items.mapNotNull { it.id },
+            description = "批量提交 ${items.size} 个项目",
+        )
         return builder.ok().data(items.map { it.toPublic() }).build()
     }
 

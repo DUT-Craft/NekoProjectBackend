@@ -162,17 +162,19 @@ class ObjectItemService(
     @Value("\${neko.project.max-per-manager:10}") private val maxPerManager: Long,
 ) {
 
+    /**
+     * 批量投稿（公开端）：与 [saveOwned] 同语义，逐条归属 [ownerId] 并强制 [status]，
+     * 整批在同一事务内提交（任一条超额 / 失败则全批回滚）。自调用绕过代理，
+     * 但本方法 [Transactional] 覆盖每条 [saveOwned]，事务边界由本方法界定。
+     */
     @Transactional
-    fun save(request: ObjectItemSaveRequest): ObjectItemResponse {
-        val entity = request.toEntity()
-        return objectItemRepository.save(entity).toResponse()
-    }
-
-    @Transactional
-    fun saveBatch(requests: List<ObjectItemSaveRequest>): List<ObjectItemResponse> {
+    fun saveBatchOwned(
+        requests: List<ObjectItemSaveRequest>,
+        ownerId: Long,
+        status: ObjectItemStatus,
+    ): List<ObjectItemResponse> {
         validateBatchSize(requests, "批量保存项目条目不能为空")
-        return objectItemRepository.saveAll(requests.map { it.toEntity() })
-            .map { it.toResponse() }
+        return requests.map { saveOwned(it, ownerId, status) }
     }
 
     @Transactional(readOnly = true)
