@@ -1,6 +1,8 @@
 package `fun`.utf8.nekoprojectbackend.datasource.jdbc
 
 import org.springframework.data.jpa.repository.JpaRepository
+import org.springframework.data.jpa.repository.Query
+import org.springframework.data.repository.query.Param
 import org.springframework.stereotype.Repository
 
 /** 用户表数据访问层。 */
@@ -17,8 +19,13 @@ interface UserRepository : JpaRepository<User, Long> {
     /** 角色范围内的全部账号：用于列出可归属项目的账号（项目管理 + 总管理）。 */
     fun findByRoleIn(roles: Collection<Role>): List<User>
 
-    /** 拥有项目创建资格或为超级管理员的账号：设计 §2.2 下「可创建/归属项目」的候选人。 */
-    fun findByCanCreateProjectTrueOrRole(canCreateProject: Boolean, role: Role): List<User>
+    /** 拥有项目创建资格或为超级管理员的账号：设计 §2.2 下「可创建/归属项目」的候选人。
+     *
+     *  注意：派生方法名 `findByCanCreateProjectTrueOrRole(...)` 会被 PartTree 解析歧义——
+     *  `Or` 紧跟字段名 `Role` 时参数绑定错位，Hibernate 报 `true is not assignable to Role`。
+     *  故改用显式 JPQL，语义清晰无歧义。 */
+    @Query("select u from User u where u.canCreateProject = true or u.role = :role")
+    fun findByCanCreateProjectTrueOrRole(@Param("role") role: Role): List<User>
 
     /** 当前活跃的超级管理员数量：用于「最后一个超级管理员」保护（设计 §11）。 */
     fun countByRoleAndStatus(role: Role, status: Status): Long

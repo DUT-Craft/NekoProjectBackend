@@ -161,6 +161,10 @@ class AdminUserController(
             throw ForbiddenException("管理员密码不正确")
         }
         val user = userService.findById(id) ?: throw UserNotFoundException()
+        // 已注销账号已匿名化，封禁无意义且会干扰审计链路（设计 §10.2）
+        if (user.status == Status.DELETED) {
+            throw ForbiddenException("已注销的账号无法封禁")
+        }
         userService.ensureNotLastSuperAdmin(user)
         user.status = Status.BANNED
         userService.save(user)
@@ -186,6 +190,10 @@ class AdminUserController(
     ): ResponseEntity<Response> {
         accessService.requireSuperAdmin(admin)
         val user = userService.findById(id) ?: throw UserNotFoundException()
+        // 已注销账号必须走恢复流程（设计 §10），不能直接解封回 ACTIVE
+        if (user.status == Status.DELETED) {
+            throw ForbiddenException("已注销的账号无法解封")
+        }
         user.status = Status.ACTIVE
         userService.save(user)
         operationLogService.record(
@@ -203,7 +211,8 @@ class AdminUserController(
     fun grantCreateProject(
         @AuthenticationPrincipal admin: LoginUser,
         @PathVariable id: Long,
-        @RequestBody req: GrantCreateProjectRequest,
+        // body 整体可选：前端无 reason 时发空 body，@RequestBody 默认 required 会抛「Required request body is missing」
+        @RequestBody(required = false) req: GrantCreateProjectRequest?,
     ): ResponseEntity<Response> {
         accessService.requireSuperAdmin(admin)
         val user = userService.findById(id) ?: throw UserNotFoundException()
@@ -214,7 +223,7 @@ class AdminUserController(
             action = "GRANT_CREATE_PROJECT",
             targetType = "USER",
             targetId = id,
-            description = "授予项目创建资格：${user.username}" + (req.reason?.takeIf { it.isNotBlank() }?.let { "，原因 $it" } ?: ""),
+            description = "授予项目创建资格：${user.username}" + (req?.reason?.takeIf { it.isNotBlank() }?.let { "，原因 $it" } ?: ""),
         )
         return builder.ok().message("已授予项目创建资格").build()
     }
@@ -224,10 +233,16 @@ class AdminUserController(
     fun revokeCreateProject(
         @AuthenticationPrincipal admin: LoginUser,
         @PathVariable id: Long,
-        @RequestBody req: GrantCreateProjectRequest,
+        // body 整体可选：前端无 reason 时发空 body，@RequestBody 默认 required 会抛「Required request body is missing」
+        @RequestBody(required = false) req: GrantCreateProjectRequest?,
     ): ResponseEntity<Response> {
         accessService.requireSuperAdmin(admin)
         val user = userService.findById(id) ?: throw UserNotFoundException()
+        // 超级管理员的创建资格恒为开启（listUsers 中 canCreateProject = role==SUPER_ADMIN || flag），
+        // 撤销其 flag 是无效操作且会造成 UI 误导，直接拦截。
+        if (user.role == Role.SUPER_ADMIN) {
+            throw ForbiddenException("超级管理员的创建资格恒为开启，不可撤销")
+        }
         user.canCreateProject = false
         userService.save(user)
         operationLogService.record(
@@ -235,7 +250,7 @@ class AdminUserController(
             action = "REVOKE_CREATE_PROJECT",
             targetType = "USER",
             targetId = id,
-            description = "撤销项目创建资格：${user.username}" + (req.reason?.takeIf { it.isNotBlank() }?.let { "，原因 $it" } ?: ""),
+            description = "撤销项目创建资格：${user.username}" + (req?.reason?.takeIf { it.isNotBlank() }?.let { "，原因 $it" } ?: ""),
         )
         return builder.ok().message("已撤销项目创建资格").build()
     }

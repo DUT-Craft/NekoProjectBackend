@@ -44,7 +44,7 @@ class UserService(
 
     /** 可归属/创建项目的全部账号：拥有项目创建资格 或 超级管理员（设计 §2.2）。 */
     fun findAssignableOwners(): List<User> {
-        return userRepository.findByCanCreateProjectTrueOrRole(canCreateProject = true, role = Role.SUPER_ADMIN)
+        return userRepository.findByCanCreateProjectTrueOrRole(Role.SUPER_ADMIN)
     }
 
     /** 全量用户列表（管理端用）：keyword 为空返回全部，否则按用户名/昵称/邮箱模糊查。 */
