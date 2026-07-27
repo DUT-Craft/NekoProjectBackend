@@ -92,7 +92,10 @@ class TagService(
         val name = requireTagName(request.name)
         val description = normalizeDescription(request.description)
         tagRepository.findAllActiveForUpdate()
-        val parentId = request.parentId?.let { requireParentId(it) }
+        val parentId = request.parentId?.let {
+            requireSecondLevelTagIsSelectable(request.selectable)
+            requireRootParentId(it)
+        }
         ensureNameAvailable(name, excludeId = null)
         val now = LocalDateTime.now()
         val tag = Tag().apply {
@@ -126,7 +129,14 @@ class TagService(
             if (isAncestorOrSelf(candidateAncestor = id, nodeId = newParentId)) {
                 throw ParamErrorException("不能把标签移动到自己或其后代节点下")
             }
-            requireParentId(newParentId)
+        }
+        if (newParentId != null) {
+            requireSecondLevelTagIsSelectable(request.selectable)
+            requireRootParentId(newParentId)
+            val activeChildren = tagRepository.countByParentIdAndDeletedAtIsNull(id)
+            if (activeChildren > 0) {
+                throw ConflictException("该标签下还有 $activeChildren 个子标签，不能移动到二级")
+            }
         }
         ensureNameAvailable(name, excludeId = id)
         tag.name = name
@@ -260,13 +270,24 @@ class TagService(
         }
     }
 
-    private fun requireParentId(parentId: Long): Long {
+    /** 父标签必须是活跃一级标签，确保标签树最多只有两级。 */
+    private fun requireRootParentId(parentId: Long): Long {
         val parent = tagRepository.findById(parentId)
             .orElseThrow { ResourceNotFoundException("父标签不存在") }
         if (parent.deletedAt != null) {
             throw ParamErrorException("父标签已删除")
         }
+        if (parent.parentId != null) {
+            throw ParamErrorException("标签最多只能有两级，二级标签不能作为父标签")
+        }
         return parentId
+    }
+
+    /** 分组标签只能位于一级，二级标签必须可被项目选择。 */
+    private fun requireSecondLevelTagIsSelectable(selectable: Boolean) {
+        if (!selectable) {
+            throw ParamErrorException("只有一级标签可以作为分组，二级标签必须可选")
+        }
     }
 
     private fun requireTagName(raw: String): String {

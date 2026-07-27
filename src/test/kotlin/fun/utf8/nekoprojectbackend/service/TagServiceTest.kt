@@ -160,6 +160,29 @@ class TagServiceTest {
     }
 
     @Test
+    fun `create rejects a second-level tag as parent`() {
+        whenever(tagRepository.findById(2L)).thenReturn(Optional.of(tag(2, "建筑", parentId = 1L)))
+
+        val ex = assertThrows<ParamErrorException> {
+            service.create(TagSaveRequest(name = "中式建筑", parentId = 2L))
+        }
+
+        assertTrue(ex.message.contains("两级"))
+        Mockito.verify(tagRepository, Mockito.never()).saveAndFlush(any())
+    }
+
+    @Test
+    fun `create rejects non-selectable second-level tag`() {
+        val ex = assertThrows<ParamErrorException> {
+            service.create(TagSaveRequest(name = "子分组", parentId = 1L, selectable = false))
+        }
+
+        assertTrue(ex.message.contains("只有一级标签"))
+        Mockito.verify(tagRepository, Mockito.never()).findById(1L)
+        Mockito.verify(tagRepository, Mockito.never()).saveAndFlush(any())
+    }
+
+    @Test
     fun `create rejects description longer than database column`() {
         assertThrows<ParamErrorException> {
             service.create(TagSaveRequest(name = "valid", description = "x".repeat(256)))
@@ -191,6 +214,20 @@ class TagServiceTest {
             service.update(1L, TagSaveRequest(name = "建筑", parentId = 5L))
         }
         assertTrue(ex.message.contains("后代"))
+    }
+
+    @Test
+    fun `update rejects moving a parent tag to second level`() {
+        whenever(tagRepository.findById(1L)).thenReturn(Optional.of(tag(1, "项目方向", selectable = false)))
+        whenever(tagRepository.findById(2L)).thenReturn(Optional.of(tag(2, "玩法")))
+        whenever(tagRepository.countByParentIdAndDeletedAtIsNull(1L)).thenReturn(2L)
+
+        val ex = assertThrows<ConflictException> {
+            service.update(1L, TagSaveRequest(name = "项目方向", parentId = 2L, selectable = true))
+        }
+
+        assertTrue(ex.message.contains("不能移动到二级"))
+        Mockito.verify(tagRepository, Mockito.never()).saveAndFlush(any())
     }
 
     // ---- delete 防误删分支 ----

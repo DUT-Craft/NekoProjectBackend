@@ -8,7 +8,7 @@ import java.time.LocalDateTime
  *
  * - name 为展示名；normalizedName（trim + 小写）由数据库唯一约束兜底。
  *   软删除时 normalizedName 会改为带 ID 的墓碑值，使原名称可以再次创建。
- * - parentId 非空表示子节点；selectable=false 表示仅用于分组的「不可选」节点（项目不能直接关联）。
+ * - parentId 非空表示二级节点；标签树最多两级，只有一级节点允许 selectable=false 作为分组。
  * - deletedAt 非空表示软删除：不再出现在公开树 / 项目选择器 / 搜索中，并解除全部项目关联。
  */
 @Entity
