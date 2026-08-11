@@ -1,6 +1,8 @@
 HELP.md
 .gradle
 build/
+storage/
+*.log
 !gradle/wrapper/gradle-wrapper.jar
 !**/src/main/**/build/
 !**/src/test/**/build/
@@ -38,7 +40,7 @@ out/
 
 ### Kotlin ###
 .kotlin
-/.env
-/logs/
-/docs/
-/.ai/
+.diagnostics/
+
+# Local environment variables
+.env

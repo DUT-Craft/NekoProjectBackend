@@ -1,0 +1,43 @@
+package top.foxball.nekomainsite.handlder
+
+import org.springframework.http.HttpStatus
+
+/** 业务异常基类，携带 HTTP 状态码；子类对应各类业务错误（未找到、未授权、参数错误等）。 */
+open class BusinessException(
+    val status: HttpStatus,
+    override val message: String
+) : RuntimeException(message) {
+    val code: Int = status.value()
+}
+
+class UsernameOrPasswordErrorException(
+    message: String = "用户名或密码错误"
+) : BusinessException(HttpStatus.UNAUTHORIZED, message)
+
+class UserDisabledException(
+    message: String = "用户被禁用"
+) : BusinessException(HttpStatus.FORBIDDEN, message)
+
+class UnauthorizedException(
+    message: String = "未授权"
+) : BusinessException(HttpStatus.UNAUTHORIZED, message)
+
+class ForbiddenException(
+    message: String = "禁止访问"
+) : BusinessException(HttpStatus.FORBIDDEN, message)
+
+class ConflictException(
+    message: String = "资源状态冲突"
+) : BusinessException(HttpStatus.CONFLICT, message)
+
+class IntegrationUnavailableException(
+    message: String = "外部登录服务暂未配置"
+) : BusinessException(HttpStatus.SERVICE_UNAVAILABLE, message)
+
+class ResourceNotFoundException(
+    message: String = "资源不存在"
+) : BusinessException(HttpStatus.NOT_FOUND, message)
+
+class ParamErrorException(
+    message: String = "参数错误"
+) : BusinessException(HttpStatus.BAD_REQUEST, message)

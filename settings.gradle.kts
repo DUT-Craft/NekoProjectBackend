@@ -1,1 +1,1 @@
-rootProject.name = "NekoProjectBackend"
+rootProject.name = "NekoMainSite"

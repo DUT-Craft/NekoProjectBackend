@@ -1,0 +1,1 @@
+ALTER TABLE wiki_sections ADD COLUMN IF NOT EXISTS group_name VARCHAR(80) NOT NULL DEFAULT '入服指南';

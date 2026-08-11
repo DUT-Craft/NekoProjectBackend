@@ -1,0 +1,24 @@
+server:
+  address: 127.0.0.1
+
+spring:
+  datasource:
+    url: jdbc:h2:mem:neko;MODE=PostgreSQL;DB_CLOSE_DELAY=-1;DATABASE_TO_LOWER=TRUE
+    driver-class-name: org.h2.Driver
+    username: sa
+    password:
+  autoconfigure:
+    exclude:
+      - org.springframework.boot.data.redis.autoconfigure.DataRedisAutoConfiguration
+      - org.springframework.boot.data.redis.autoconfigure.DataRedisRepositoriesAutoConfiguration
+neko:
+  local:
+    admin:
+      username: ${LOCAL_ADMIN_USERNAME:admin}
+      password: ${LOCAL_ADMIN_PASSWORD:admin12345}
+      email: ${LOCAL_ADMIN_EMAIL:admin@neko.local}
+  file:
+    storage-path: ./build/local-storage
+    base-url: ${PUBLIC_BASE_URL:}
+  server-status:
+    enabled: false
