@@ -2,10 +2,13 @@ package `fun`.utf8.nekoprojectbackend.controller
 
 import `fun`.utf8.nekoprojectbackend.datasource.jdbc.Role
 import `fun`.utf8.nekoprojectbackend.datasource.jdbc.Status
+import `fun`.utf8.nekoprojectbackend.handlder.ForbiddenException
+import `fun`.utf8.nekoprojectbackend.handlder.UserNotFoundException
 import `fun`.utf8.nekoprojectbackend.security.LoginUser
 import `fun`.utf8.nekoprojectbackend.handlder.ParamErrorException
 import `fun`.utf8.nekoprojectbackend.service.AccessService
 import `fun`.utf8.nekoprojectbackend.service.OperationLogService
+import `fun`.utf8.nekoprojectbackend.service.TokenStore
 import `fun`.utf8.nekoprojectbackend.service.UserService
 import `fun`.utf8.nekoprojectbackend.shared.Response
 import `fun`.utf8.nekoprojectbackend.shared.ResponseBuilder
@@ -15,7 +18,9 @@ import jakarta.validation.constraints.NotBlank
 import jakarta.validation.constraints.Size
 import org.springframework.http.ResponseEntity
 import org.springframework.security.core.annotation.AuthenticationPrincipal
+import org.springframework.security.crypto.password.PasswordEncoder
 import org.springframework.web.bind.annotation.*
+import java.time.LocalDateTime
 
 /**
  * 管理端用户接口（/api/admin/users）：JWT 鉴权。
@@ -31,6 +36,8 @@ class AdminUserController(
     private val userService: UserService,
     private val accessService: AccessService,
     private val operationLogService: OperationLogService,
+    private val tokenStore: TokenStore,
+    private val passwordEncoder: PasswordEncoder,
     private val builder: ResponseBuilder,
     private val validator: Validator,
 ) {
@@ -45,7 +52,7 @@ class AdminUserController(
         @field:Email(message = "邮箱格式不正确")
         @field:Size(max = 128, message = "邮箱不能超过 128 个字符")
         val email: String,
-        val role: Role = Role.PROJECT_MANAGER,
+        val role: Role = Role.USER,
     )
 
     @PostMapping
@@ -79,9 +86,44 @@ class AdminUserController(
             username = user.username,
             email = user.email,
             nickname = user.nickname,
-            role = user.role ?: Role.PROJECT_MANAGER,
-            status = user.status ?: Status.ACTIVE,
+            role = user.role,
+            status = user.status,
         )
+        return builder.ok().data(rs).build()
+    }
+
+    /** 总管理列出全部用户（用户管理页用）：支持 keyword 模糊搜用户名/昵称/邮箱。仅总管理可调用。 */
+    @GetMapping
+    fun listUsers(
+        @AuthenticationPrincipal admin: LoginUser,
+        @RequestParam(required = false) keyword: String?,
+    ): ResponseEntity<Response> {
+        accessService.requireSuperAdmin(admin)
+        val users = userService.listAll(keyword)
+
+        data class UserSummary(
+            val id: Long,
+            val username: String,
+            val nickname: String,
+            val email: String,
+            val role: Role,
+            val status: Status,
+            val canCreateProject: Boolean,
+            val createdAt: LocalDateTime?,
+        )
+
+        val rs = users.map {
+            UserSummary(
+                id = it.id!!,
+                username = it.username,
+                nickname = it.nickname,
+                email = it.email,
+                role = it.role,
+                status = it.status,
+                canCreateProject = it.role == Role.SUPER_ADMIN || it.canCreateProject,
+                createdAt = it.createdAt,
+            )
+        }
         return builder.ok().data(rs).build()
     }
 
@@ -103,9 +145,126 @@ class AdminUserController(
                 id = it.id!!,
                 username = it.username,
                 nickname = it.nickname,
-                role = it.role ?: Role.PROJECT_MANAGER,
+                role = it.role,
             )
         }
         return builder.ok().data(rs).build()
+    }
+
+    data class GrantCreateProjectRequest(val reason: String? = null)
+
+    data class BanRequest(
+        val reason: String? = null,
+        val endTime: LocalDateTime? = null,
+        /** 敏感操作二次确认：当前管理员密码（设计 §6.4 / §11）。 */
+        val confirmPassword: String = "",
+    )
+
+    /** 总管理封禁用户（设计 §10.1）：置 BANNED，立即吊销全部会话，埋审计。 */
+    @PostMapping("/{id}/ban")
+    fun ban(
+        @AuthenticationPrincipal admin: LoginUser,
+        @PathVariable id: Long,
+        @RequestBody req: BanRequest,
+    ): ResponseEntity<Response> {
+        accessService.requireSuperAdmin(admin)
+        // 敏感操作二次确认：校验操作者当前密码
+        val adminUser = userService.findById(admin.id) ?: throw ForbiddenException("操作者账号不存在")
+        if (!passwordEncoder.matches(req.confirmPassword, adminUser.password)) {
+            throw ForbiddenException("管理员密码不正确")
+        }
+        val user = userService.findById(id) ?: throw UserNotFoundException()
+        // 已注销账号已匿名化，封禁无意义且会干扰审计链路（设计 §10.2）
+        if (user.status == Status.DELETED) {
+            throw ForbiddenException("已注销的账号无法封禁")
+        }
+        userService.ensureNotLastSuperAdmin(user)
+        user.status = Status.BANNED
+        userService.save(user)
+        // 封禁立即下线：JwtAuthenticationFilter 不读 status，必须靠清白名单让 access token 失效
+        tokenStore.invalidateAllSessions(id)
+        operationLogService.record(
+            operator = admin,
+            action = "USER_BAN",
+            targetType = "USER",
+            targetId = id,
+            description = "封禁用户 ${user.username}" +
+                (req.reason?.takeIf { it.isNotBlank() }?.let { "，原因 $it" } ?: "") +
+                (req.endTime?.let { "，至 $it" } ?: ""),
+        )
+        return builder.ok().message("用户已封禁").build()
+    }
+
+    /** 总管理解封用户：置 ACTIVE，埋审计。 */
+    @PostMapping("/{id}/unban")
+    fun unban(
+        @AuthenticationPrincipal admin: LoginUser,
+        @PathVariable id: Long,
+    ): ResponseEntity<Response> {
+        accessService.requireSuperAdmin(admin)
+        val user = userService.findById(id) ?: throw UserNotFoundException()
+        // 已注销账号必须走恢复流程（设计 §10），不能直接解封回 ACTIVE
+        if (user.status == Status.DELETED) {
+            throw ForbiddenException("已注销的账号无法解封")
+        }
+        user.status = Status.ACTIVE
+        userService.save(user)
+        operationLogService.record(
+            operator = admin,
+            action = "USER_UNBAN",
+            targetType = "USER",
+            targetId = id,
+            description = "解封用户 ${user.username}",
+        )
+        return builder.ok().message("用户已解封").build()
+    }
+
+    /** 总管理授予普通用户项目创建资格（设计 §2.2 / §4.2）。 */
+    @PostMapping("/{id}/grant-create-project")
+    fun grantCreateProject(
+        @AuthenticationPrincipal admin: LoginUser,
+        @PathVariable id: Long,
+        // body 整体可选：前端无 reason 时发空 body，@RequestBody 默认 required 会抛「Required request body is missing」
+        @RequestBody(required = false) req: GrantCreateProjectRequest?,
+    ): ResponseEntity<Response> {
+        accessService.requireSuperAdmin(admin)
+        val user = userService.findById(id) ?: throw UserNotFoundException()
+        user.canCreateProject = true
+        userService.save(user)
+        operationLogService.record(
+            operator = admin,
+            action = "GRANT_CREATE_PROJECT",
+            targetType = "USER",
+            targetId = id,
+            description = "授予项目创建资格：${user.username}" + (req?.reason?.takeIf { it.isNotBlank() }?.let { "，原因 $it" } ?: ""),
+        )
+        return builder.ok().message("已授予项目创建资格").build()
+    }
+
+    /** 总管理撤销普通用户项目创建资格（设计 §2.2：撤权不影响已拥有的项目）。 */
+    @PostMapping("/{id}/revoke-create-project")
+    fun revokeCreateProject(
+        @AuthenticationPrincipal admin: LoginUser,
+        @PathVariable id: Long,
+        // body 整体可选：前端无 reason 时发空 body，@RequestBody 默认 required 会抛「Required request body is missing」
+        @RequestBody(required = false) req: GrantCreateProjectRequest?,
+    ): ResponseEntity<Response> {
+        accessService.requireSuperAdmin(admin)
+        val user = userService.findById(id) ?: throw UserNotFoundException()
+        // 超级管理员的创建资格恒为开启（listUsers 中 canCreateProject = role==SUPER_ADMIN || flag），
+        // 撤销其 flag 是无效操作且会造成 UI 误导，直接拦截。
+        if (user.role == Role.SUPER_ADMIN) {
+            throw ForbiddenException("超级管理员的创建资格恒为开启，不可撤销")
+        }
+        user.canCreateProject = false
+        userService.save(user)
+        operationLogService.record(
+            operator = admin,
+            action = "REVOKE_CREATE_PROJECT",
+            targetType = "USER",
+            targetId = id,
+            description = "撤销项目创建资格：${user.username}" + (req?.reason?.takeIf { it.isNotBlank() }?.let { "，原因 $it" } ?: ""),
+        )
+        return builder.ok().message("已撤销项目创建资格").build()
     }
 }

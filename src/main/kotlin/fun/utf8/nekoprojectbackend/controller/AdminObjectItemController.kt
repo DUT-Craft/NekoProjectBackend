@@ -6,7 +6,6 @@ import `fun`.utf8.nekoprojectbackend.security.LoginUser
 import `fun`.utf8.nekoprojectbackend.service.*
 import `fun`.utf8.nekoprojectbackend.shared.Response
 import `fun`.utf8.nekoprojectbackend.shared.ResponseBuilder
-import jakarta.validation.Valid
 import org.springframework.http.ResponseEntity
 import org.springframework.security.core.annotation.AuthenticationPrincipal
 import org.springframework.web.bind.annotation.*
@@ -24,21 +23,15 @@ class AdminObjectItemController(
     private val operationLogService: OperationLogService,
     private val builder: ResponseBuilder,
 ) {
-    @GetMapping("/{id}")
-    fun getById(
-        @AuthenticationPrincipal admin: LoginUser,
-        @PathVariable id: Int,
-    ): ResponseEntity<Response> {
-        accessService.ensureCanManage(admin, id)
-        return builder.ok().data(objectItemService.findById(id)).build()
-    }
-
     @GetMapping
     fun list(
         @AuthenticationPrincipal admin: LoginUser,
         @RequestParam(required = false) statuses: List<ObjectItemStatus>?,
+        @RequestParam(required = false) keyword: String?,
         @RequestParam(required = false) title: String?,
         @RequestParam(required = false) leader: String?,
+        @RequestParam(required = false) tagIds: List<Long>?,
+        @RequestParam(required = false) tagMatch: String?,
         @RequestParam(required = false) mine: Boolean?,
         @RequestParam(required = false) page: Int?,
         @RequestParam(required = false) size: Int?,
@@ -48,9 +41,12 @@ class AdminObjectItemController(
         // 否则沿用 ownerIdScope——总管理看全部、项目管理看名下。
         val ownerIdScope = if (mine == true) admin.id else accessService.ownerIdScope(admin)
         val request = ObjectItemQueryRequest(
+            keyword = keyword,
             title = title,
             leader = leader,
             statuses = statuses,
+            tagIds = tagIds,
+            tagMatch = TagMatch.from(tagMatch),
             ownerId = ownerIdScope,
         )
         val vo = objectItemService.queryPage(
@@ -80,14 +76,15 @@ class AdminObjectItemController(
     @PostMapping
     fun create(
         @AuthenticationPrincipal admin: LoginUser,
-        @Valid @RequestBody request: ObjectItemSaveRequest,
+        @RequestBody request: ObjectItemSaveRequest,
     ): ResponseEntity<Response> {
-        val requestedStatus = if (admin.role == Role.SUPER_ADMIN) {
+        // 创建项目资格校验（设计 §2.2）：超管或 canCreateProject=true
+        accessService.ensureCanCreateProject(admin)
+        val status = if (admin.role == Role.SUPER_ADMIN) {
             request.status ?: ObjectItemStatus.RECRUITING
         } else {
             ObjectItemStatus.PENDING
         }
-        val status = if (requestedStatus == ObjectItemStatus.APPROVED) ObjectItemStatus.PREPARING else requestedStatus
         val item = objectItemService.saveOwned(request, admin.id, status)
         operationLogService.record(
             operator = admin,
@@ -102,19 +99,11 @@ class AdminObjectItemController(
     @PutMapping("/batch/status")
     fun batchStatus(
         @AuthenticationPrincipal admin: LoginUser,
-        @Valid @RequestBody request: AdminBatchStatusRequest<ObjectItemStatus>,
+        @RequestBody request: AdminBatchStatusRequest<ObjectItemStatus>,
     ): ResponseEntity<Response> {
-        request.ids.forEach {
-            val current = accessService.ensureCanManage(admin, it)
-            accessService.ensureCanSetProjectStatus(admin, current.status, request.status)
-        }
-        val effectiveStatus = if (request.status == ObjectItemStatus.APPROVED) {
-            ObjectItemStatus.PREPARING
-        } else {
-            request.status
-        }
+        request.ids.forEach { accessService.ensureCanManage(admin, it) }
         val updateRequests = request.ids.map {
-            ObjectItemUpdateRequest(id = it, status = effectiveStatus)
+            ObjectItemUpdateRequest(id = it, status = request.status)
         }
         objectItemService.updateBatch(updateRequests)
         operationLogService.record(
@@ -122,7 +111,7 @@ class AdminObjectItemController(
             action = "PROJECT_STATUS_BATCH",
             targetType = "PROJECT",
             targetId = request.ids,
-            description = "批量改项目状态为 $effectiveStatus：$request.ids",
+            description = "批量改项目状态为 ${request.status}：$request.ids",
         )
 
         data class BatchResult(
@@ -134,7 +123,7 @@ class AdminObjectItemController(
         val rs = BatchResult(
             updated = true,
             ids = request.ids,
-            status = effectiveStatus,
+            status = request.status,
         )
         return builder.ok().data(rs).build()
     }

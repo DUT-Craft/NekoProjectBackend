@@ -84,7 +84,102 @@ class MailService(
             VerificationCodeService.Scene.CHANGE_PASSWORD -> "你正在修改账号密码，请使用下方验证码进行身份确认。"
             VerificationCodeService.Scene.RESET_PASSWORD -> "你正在找回账号密码，请使用下方验证码重置密码。"
             VerificationCodeService.Scene.EMAIL_LOGIN -> "你正在进行邮箱验证登录，请使用下方验证码完成登录。"
+            VerificationCodeService.Scene.RECOVER_USERNAME -> "你正在找回用户名，请使用下方验证码完成身份确认。"
+            VerificationCodeService.Scene.REACTIVATE -> "你正在恢复已停用的账号，请使用下方验证码完成恢复。"
         }
+
+    /** 找回用户名：把用户名发送到已绑定邮箱（设计 §6.3）。 */
+    fun sendUsernameReminder(toEmail: String, username: String) {
+        val from = props.from
+        if (from.isBlank()) {
+            log.error("发件人地址未配置，无法发送找回用户名邮件")
+            throw EmailSendFailedException()
+        }
+        val subject = "${props.subjectPrefix} - 用户名找回"
+        val html = buildReminderHtml(username)
+        sendHtml(from, toEmail, subject, html)
+        log.info("找回用户名邮件已发送：to={}", toEmail)
+    }
+
+    /** 安全通知（改密 / 改邮箱 / 角色变更等，设计 §12）：type 为事件类型标签。 */
+    fun sendSecurityNotice(toEmail: String, type: String) {
+        val from = props.from
+        if (from.isBlank()) {
+            // 安全通知非关键路径，发件人未配置时仅记日志，不阻断业务
+            log.warn("发件人地址未配置，跳过安全通知邮件：type={}", type)
+            return
+        }
+        val subject = "${props.subjectPrefix} - 安全通知"
+        val html = buildSecurityNoticeHtml(type)
+        try {
+            sendHtml(from, toEmail, subject, html)
+            log.info("安全通知邮件已发送：to={}, type={}", toEmail, type)
+        } catch (e: Exception) {
+            log.warn("安全通知邮件发送失败（不阻断业务）：to={}, type={}, err={}", toEmail, type, e.message)
+        }
+    }
+
+    private fun sendHtml(from: String, toEmail: String, subject: String, html: String) {
+        val mime: MimeMessage = mailSender.createMimeMessage()
+        val helper = MimeMessageHelper(mime, false, Charsets.UTF_8.name())
+        try {
+            helper.setFrom(from)
+            helper.setTo(toEmail)
+            helper.setSubject(subject)
+            helper.setText(html, true)
+            mailSender.send(mime)
+        } catch (e: Exception) {
+            log.error("邮件发送失败：to={}, subject={}, err={}", toEmail, subject, e.message, e)
+            throw EmailSendFailedException()
+        }
+    }
+
+    private fun buildReminderHtml(username: String): String = """
+        <div style="max-width:480px;margin:0 auto;font-family:-apple-system,Segoe UI,Roboto,sans-serif;color:#2d2418;">
+          <div style="background:#6b8f32;color:#fffbe4;padding:18px 22px;border-radius:10px 10px 0 0;font-weight:900;font-size:18px;">
+            ${escape(props.subjectPrefix)}
+          </div>
+          <div style="border:2px solid #5a3a21;border-top:0;border-radius:0 0 10px 10px;padding:24px 22px;background:#fffdf3;">
+            <h2 style="margin:0 0 8px;color:#2d2418;">用户名找回</h2>
+            <p style="margin:0 0 16px;color:#60462b;line-height:1.7;">你请求找回账号用户名，你的用户名是：</p>
+            <div style="text-align:center;margin:18px 0;">
+              <span style="display:inline-block;font-size:24px;font-weight:900;color:#5a3a21;background:#ffdf7e;border:2px solid #5a3a21;border-radius:8px;padding:10px 24px;">
+                ${escape(username)}
+              </span>
+            </div>
+            <p style="margin:0;color:#795b36;font-size:13px;line-height:1.7;">
+              若非本人操作，请立即修改密码并检查账号安全。
+            </p>
+          </div>
+          <p style="text-align:center;color:#9b8665;font-size:12px;margin-top:14px;">
+            此邮件由系统自动发送，请勿直接回复。
+          </p>
+        </div>
+    """.trimIndent()
+
+    private fun buildSecurityNoticeHtml(type: String): String {
+        val event = when (type) {
+            "PASSWORD_CHANGED" -> "你的账号密码已被修改"
+            "PASSWORD_RESET" -> "你的账号密码已被重置"
+            "EMAIL_CHANGED" -> "你的账号绑定邮箱已被修改"
+            "ROLE_CHANGED" -> "你的账号角色已发生变更"
+            else -> "你的账号发生了一次敏感操作"
+        }
+        return """
+            <div style="max-width:480px;margin:0 auto;font-family:-apple-system,Segoe UI,Roboto,sans-serif;color:#2d2418;">
+              <div style="background:#8a5a32;color:#fffbe4;padding:18px 22px;border-radius:10px 10px 0 0;font-weight:900;font-size:18px;">
+                ${escape(props.subjectPrefix)}
+              </div>
+              <div style="border:2px solid #5a3a21;border-top:0;border-radius:0 0 10px 10px;padding:24px 22px;background:#fffdf3;">
+                <h2 style="margin:0 0 8px;color:#2d2418;">安全通知</h2>
+                <p style="margin:0;color:#60462b;line-height:1.7;">${escape(event)}。如果是你本人操作，请忽略本邮件；如果不是，请立即登录修改密码并联系管理员。</p>
+              </div>
+              <p style="text-align:center;color:#9b8665;font-size:12px;margin-top:14px;">
+                此邮件由系统自动发送，请勿直接回复。
+              </p>
+            </div>
+        """.trimIndent()
+    }
 
     private fun escape(text: String): String =
         text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")

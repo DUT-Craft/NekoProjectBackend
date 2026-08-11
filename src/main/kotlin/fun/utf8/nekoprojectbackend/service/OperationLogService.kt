@@ -1,5 +1,7 @@
 package `fun`.utf8.nekoprojectbackend.service
 
+import `fun`.utf8.nekoprojectbackend.datasource.jdbc.AuditLog
+import `fun`.utf8.nekoprojectbackend.datasource.jdbc.AuditLogRepository
 import `fun`.utf8.nekoprojectbackend.security.LoginUser
 import jakarta.annotation.PostConstruct
 import jakarta.annotation.PreDestroy
@@ -9,7 +11,6 @@ import org.springframework.security.core.context.SecurityContextHolder
 import org.springframework.stereotype.Service
 import org.springframework.web.context.request.RequestContextHolder
 import org.springframework.web.context.request.ServletRequestAttributes
-import tools.jackson.databind.ObjectMapper
 import java.io.File
 import java.nio.charset.StandardCharsets
 import java.nio.file.Files
@@ -34,7 +35,7 @@ import java.util.concurrent.TimeUnit
  */
 @Service
 class OperationLogService(
-    private val objectMapper: ObjectMapper,
+    private val auditLogRepository: AuditLogRepository,
     @Value("\${neko.audit.log-path:./logs/operation.log}") private val logPath: String,
     @Value("\${neko.audit.max-size-mb:50}") private val maxSizeMb: Long,
     @Value("\${neko.audit.max-archives:30}") private val maxArchives: Int,
@@ -80,16 +81,37 @@ class OperationLogService(
         // 上下文必须在请求线程同步抓取（异步线程上 ThreadLocal 已失效）
         val (opId, opName, opRole) = resolveOperator(operatorId, operatorName, operatorRole)
         val ip = currentIp()
-        val line = runCatching {
-            buildJson(opId, opName, opRole, action, targetType, targetId, description, ip, success, error)
-        }.getOrElse {
-            appLog.error("序列化操作日志失败: ${it.message}", it)
-            return
-        }
+        val line = buildJson(opId, opName, opRole, action, targetType, targetId, description, ip, success, error)
+        // 双写：异步写文件（兜底）+ 异步落库（可查询，设计 §11 / §13）
         writer.execute {
             runCatching { appendLine(line) }
                 .onFailure { appLog.error("写入操作日志失败: ${it.message}", it) }
         }
+        writer.execute {
+            runCatching { persistAudit(opId, opName, opRole, action, targetType, targetId, description, ip, success, error) }
+                .onFailure { appLog.warn("审计落库失败: ${it.message}") }
+        }
+    }
+
+    private fun persistAudit(
+        operatorId: Long?, operatorName: String?, operatorRole: String?,
+        action: String, targetType: String?, targetId: Any?, description: String,
+        ip: String?, success: Boolean, error: String?,
+    ) {
+        auditLogRepository.save(
+            AuditLog().apply {
+                this.operatorId = operatorId
+                this.operatorName = operatorName
+                this.operatorRole = operatorRole
+                this.action = action
+                this.targetType = targetType
+                this.targetId = targetId?.toString()
+                this.description = description.take(512)
+                this.ip = ip
+                this.success = success
+                this.error = error?.take(512)
+            }
+        )
     }
 
     /** 便捷重载：直接传已登录的 [LoginUser]。 */
@@ -174,20 +196,58 @@ class OperationLogService(
         action: String, targetType: String?, targetId: Any?, description: String,
         ip: String?, success: Boolean, error: String?,
     ): String {
-        return objectMapper.writeValueAsString(
-            linkedMapOf(
-                "time" to Instant.now().toString(),
-                "operatorId" to operatorId,
-                "operatorName" to operatorName,
-                "operatorRole" to operatorRole,
-                "action" to action,
-                "targetType" to targetType,
-                "targetId" to targetId?.toString(),
-                "description" to description,
-                "ip" to ip,
-                "success" to success,
-                "error" to error,
-            ),
-        )
+        val sb = StringBuilder(256)
+        sb.append("{\"time\":\"").append(escape(Instant.now().toString())).append('"')
+        sb.raw("operatorId", operatorId)
+        sb.str("operatorName", operatorName)
+        sb.str("operatorRole", operatorRole)
+        sb.str("action", action)
+        sb.str("targetType", targetType)
+        sb.str("targetId", targetId?.toString())
+        sb.str("description", description)
+        sb.str("ip", ip)
+        sb.bool("success", success)
+        sb.str("error", error)
+        sb.append('}')
+        return sb.toString()
+    }
+
+    private fun StringBuilder.str(key: String, value: String?) {
+        append(',').append('"').append(key).append("\":")
+        if (value == null) {
+            append("null")
+        } else {
+            append('"').append(escape(value)).append('"')
+        }
+    }
+
+    private fun StringBuilder.raw(key: String, value: Any?) {
+        append(',').append('"').append(key).append("\":").append(value?.toString() ?: "null")
+    }
+
+    private fun StringBuilder.bool(key: String, value: Boolean) {
+        append(',').append('"').append(key).append("\":").append(value)
+    }
+
+    private fun escape(s: String): String = buildString(s.length) {
+        s.forEach { ch ->
+            when (ch) {
+                '\\' -> append("\\\\")
+                '"' -> append("\\\"")
+                '\n' -> append("\\n")
+                '\r' -> append("\\r")
+                '\t' -> append("\\t")
+                '\b' -> append("\\b")
+                '\u000C' -> append("\\f")
+                else -> {
+                    if (ch.code < 0x20) {
+                        append("\\u")
+                        append(ch.code.toString(16).padStart(4, '0'))
+                    } else {
+                        append(ch)
+                    }
+                }
+            }
+        }
     }
 }

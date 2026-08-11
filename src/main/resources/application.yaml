@@ -62,8 +62,6 @@ neko:
     # 允许携带凭证访问 API 的前端来源，逗号分隔；禁止使用 *。
     allowed-origins: ${CORS_ALLOWED_ORIGINS:http://localhost:3000,http://127.0.0.1:3000}
   security:
-    # 仅在后端只接受可信反向代理连接时开启；开启后限流会读取 X-Forwarded-For。
-    trusted-proxy: ${TRUSTED_PROXY:false}
     rate-limit:
       # 测试环境可关闭；生产应保持开启，Redis 不可用时请求会失败而不是绕过限制。
       enabled: ${RATE_LIMIT_ENABLED:true}
@@ -80,6 +78,9 @@ neko:
       http-only: ${COOKIE_HTTP_ONLY:true}
       # SameSite 策略：Lax（同站）/ None（跨站，需 secure）/ Strict
       same-site: ${COOKIE_SAME_SITE:Lax}
+    # 可信反代开关（设计 §5.2 修正）：true 时 clientIp 才采信 X-Forwarded-For / X-Real-IP。
+    # 未部署反代时保持 false，用 remoteAddr，防客户端伪造 XFF 绕过 IP 维度限流。
+    trusted-proxy: ${NEKO_TRUSTED_PROXY:false}
   mail:
     verification:
       # 验证码有效期（秒）：600 = 10min
@@ -125,9 +126,6 @@ neko:
     password: ${ADMIN_PASSWORD:NekoLocalRoot!2026}
     # 初始管理员邮箱
     email: ${ADMIN_EMAIL:admin@nekobox.local}
-  invite:
-    # 邀请码有效期（秒）：604800 = 7d
-    ttl-seconds: ${INVITE_TTL_SECONDS:604800}
   project:
     # 单个项目经理最多持有的项目数
     max-per-manager: ${PROJECT_MAX_PER_MANAGER:10}
@@ -142,6 +140,11 @@ neko:
     max-archives: ${AUDIT_MAX_ARCHIVES:30}
     # 是否信任 X-Forwarded-For / X-Real-IP：仅在可信反代（Nginx/网关）后才开启，否则客户端可伪造审计 IP
     trust-forwarded: ${AUDIT_TRUST_FORWARDED:false}
+  moderation:
+    # 内容审核开关（评论 / 想法等 UGC 新建后的初始状态）：
+    # true=开启审核，新建置 PENDING 待管理员审核通过后才公开（默认，原行为）；
+    # false=临时关闭审核，新建直接置 APPROVED 立即公开展示
+    enabled: ${MODERATION_ENABLED:true}
   seed:
     # 是否在启动时执行数据 Seeder（初始管理员、演示数据等）
     enabled: ${SEED_ENABLED:true}
@@ -266,6 +269,9 @@ spring:
       database: ${REDIS_DATABASE:4}
       # 连接 / 命令超时
       timeout: ${REDIS_TIMEOUT:10000ms}
+      # 启动时是否 FLUSHDB 清空 Redis（RedisCleanupConfig 读取）。
+      # 本地 / 测试重置数据用 true；生产务必设 false，否则每次启动清空线上缓存。
+      clear-on-startup: ${REDIS_CLEAR_ON_STARTUP:true}
 
 # ───────────────────────── 日志 ─────────────────────────
 logging:

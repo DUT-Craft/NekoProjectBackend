@@ -4,16 +4,15 @@ import `fun`.utf8.nekoprojectbackend.config.JwtProperties
 import `fun`.utf8.nekoprojectbackend.datasource.jdbc.Role
 import `fun`.utf8.nekoprojectbackend.datasource.jdbc.Status
 import `fun`.utf8.nekoprojectbackend.datasource.jdbc.User
-import `fun`.utf8.nekoprojectbackend.handlder.ParamErrorException
 import `fun`.utf8.nekoprojectbackend.handlder.UsernameOrPasswordErrorException
 import `fun`.utf8.nekoprojectbackend.service.AuthService
-import `fun`.utf8.nekoprojectbackend.service.InviteCodeService
 import `fun`.utf8.nekoprojectbackend.service.JwtService
 import `fun`.utf8.nekoprojectbackend.service.MailService
 import `fun`.utf8.nekoprojectbackend.service.RateLimiter
 import `fun`.utf8.nekoprojectbackend.service.TokenStore
 import `fun`.utf8.nekoprojectbackend.service.UserService
 import `fun`.utf8.nekoprojectbackend.service.VerificationCodeService
+import java.time.LocalDateTime
 import org.junit.jupiter.api.Test
 import org.mockito.Mockito.mock
 import org.mockito.Mockito.never
@@ -28,7 +27,6 @@ class AuthServiceSecurityTest {
     private val passwordEncoder = mock(PasswordEncoder::class.java)
     private val jwtService = mock(JwtService::class.java)
     private val tokenStore = mock(TokenStore::class.java)
-    private val inviteCodeService = mock(InviteCodeService::class.java)
     private val verificationCodeService = mock(VerificationCodeService::class.java)
     private val mailService = mock(MailService::class.java)
     private val rateLimiter = mock(RateLimiter::class.java)
@@ -37,57 +35,11 @@ class AuthServiceSecurityTest {
         passwordEncoder,
         jwtService,
         tokenStore,
-        inviteCodeService,
         verificationCodeService,
         mailService,
         rateLimiter,
         JwtProperties(secret = "test-secret-that-is-long-enough-for-hs256"),
     )
-
-    @Test
-    fun `invalid invite does not consume the email verification code`() {
-        val user = user(id = 9, email = "member@example.test")
-        val request = AuthService.RegisterManagerRequest(
-            inviteCode = "invalid-invite",
-            username = "member",
-            password = "Strong!234",
-            email = user.email,
-            emailCode = "123456",
-        )
-        `when`(
-            userService.createUser("member", "Strong!234", user.email, Role.PROJECT_MANAGER),
-        ).thenReturn(user)
-        `when`(inviteCodeService.consume("invalid-invite", 9)).thenReturn(false)
-
-        assertFailsWith<ParamErrorException> {
-            service.registerManager(request, "test-agent")
-        }
-
-        verifyNoInteractions(verificationCodeService)
-    }
-
-    @Test
-    fun `password change requires the current accounts own email`() {
-        val user = user(id = 11, email = "owner@example.test")
-        `when`(userService.findById(11)).thenReturn(user)
-        `when`(passwordEncoder.matches("old-password", user.password)).thenReturn(true)
-        `when`(userService.normalizeEmail("other@example.test")).thenReturn("other@example.test")
-
-        assertFailsWith<ParamErrorException> {
-            service.changePassword(
-                11,
-                AuthService.ChangePasswordRequest(
-                    oldPassword = "old-password",
-                    newPassword = "Strong!234",
-                    email = "other@example.test",
-                    emailCode = "123456",
-                ),
-                "test-agent",
-            )
-        }
-
-        verifyNoInteractions(verificationCodeService)
-    }
 
     @Test
     fun `wrong password does not consume email login code`() {
@@ -104,6 +56,7 @@ class AuthServiceSecurityTest {
                     emailCode = "123456",
                 ),
                 "test-agent",
+                "203.0.113.10",
             )
         }
 
@@ -114,15 +67,15 @@ class AuthServiceSecurityTest {
     fun `password change verification is bound to the current user`() {
         val user = user(id = 14, email = "change-password@example.test")
         `when`(userService.findById(user.id!!)).thenReturn(user)
-        `when`(userService.normalizeEmail(user.email)).thenReturn(user.email)
         `when`(passwordEncoder.matches("old-password", user.password)).thenReturn(true)
+        `when`(passwordEncoder.encode("Str0ng!Pass")).thenReturn("encoded-new-password")
 
         service.changePassword(
             user.id!!,
             AuthService.ChangePasswordRequest(
                 oldPassword = "old-password",
-                newPassword = "Strong!234",
-                email = user.email,
+                newPassword = "Str0ng!Pass",
+                confirmPassword = "Str0ng!Pass",
                 emailCode = "123456",
             ),
             "test-agent",
@@ -137,12 +90,13 @@ class AuthServiceSecurityTest {
             ),
             "123456",
         )
+        verify(tokenStore).invalidateAllSessions(user.id!!)
+        verify(mailService).sendSecurityNotice(user.email, "PASSWORD_CHANGED")
     }
 
     @Test
     fun `anonymous verification code requests do not enumerate email accounts`() {
         val email = "unknown@example.test"
-        `when`(userService.normalizeEmail(email)).thenReturn(email)
         `when`(userService.findByEmail(email)).thenReturn(null)
 
         service.sendVerificationCode(
@@ -160,7 +114,7 @@ class AuthServiceSecurityTest {
     @Test
     fun `logout does not revoke a refresh token owned by another user`() {
         val jwt = JwtService(JwtProperties(secret = "test-secret-that-is-long-enough-for-hs256"))
-        val issued = jwt.issueRefreshToken(99, "other-user", Role.PROJECT_MANAGER.name, 600)
+        val issued = jwt.issueRefreshToken(99, "other-user", Role.USER.name, 600)
         `when`(jwtService.parse(issued.token)).thenReturn(jwt.parse(issued.token))
 
         service.logout(jti = "access-jti", userId = 14, refreshToken = issued.token)
@@ -171,28 +125,29 @@ class AuthServiceSecurityTest {
 
     @Test
     fun `oversized login password is rejected before bcrypt matching`() {
-        val user = user(id = 12, email = "owner@example.test")
-        `when`(userService.findByUsername("member-12")).thenReturn(user)
-
         assertFailsWith<UsernameOrPasswordErrorException> {
             service.login(
                 AuthService.LoginRequest(
-                    username = "member-12",
+                    account = "member-12",
                     password = "中".repeat(25),
                 ),
+                "test-agent",
+                "203.0.113.10",
             )
         }
 
-        verifyNoInteractions(passwordEncoder)
+        verifyNoInteractions(userService, passwordEncoder)
     }
 
-    private fun user(id: Long, email: String) = User(
-        id = id,
-        username = "member-$id",
-        password = "encoded-password",
-        email = email,
-        nickname = "member",
-        status = Status.ACTIVE,
-        role = Role.PROJECT_MANAGER,
-    )
+    private fun user(id: Long, email: String) = User().apply {
+        this.id = id
+        this.username = "member-$id"
+        this.usernameLower = this.username.lowercase()
+        this.password = "encoded-password"
+        this.email = email
+        this.nickname = "member"
+        this.status = Status.ACTIVE
+        this.role = Role.USER
+        this.emailVerifiedAt = LocalDateTime.now()
+    }
 }

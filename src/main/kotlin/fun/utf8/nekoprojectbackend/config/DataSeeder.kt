@@ -8,9 +8,11 @@ import org.springframework.context.event.EventListener
 import org.springframework.security.crypto.password.PasswordEncoder
 import org.springframework.stereotype.Component
 import org.springframework.transaction.support.TransactionTemplate
+import java.time.LocalDateTime
+import java.util.Locale
 
 /**
- * 应用就绪后通过 JPA 写入一批模拟数据（用户 / 想法 / 项目 / 评论 / 动态 / 申请）。
+ * 应用就绪后通过 JPA 写入一批模拟数据（用户 / 想法 / 项目 / 评论 / 动态 / 申请 + 项目成员关系）。
  *
  * - 由 `neko.seed.enabled` 控制开关，默认开启；
  * - 仅在用户表为空时执行，避免重复启动写脏数据；
@@ -21,9 +23,11 @@ class DataSeeder(
     private val userRepository: UserRepository,
     private val mindRepository: MindRepository,
     private val objectItemRepository: ObjectItemRepository,
+    private val tagRepository: TagRepository,
     private val commentRepository: ObjectItemCommentRepository,
     private val updateRepository: ObjectItemUpdateRepository,
     private val joinApplicationRepository: JoinApplicationRepository,
+    private val projectMemberRepository: ProjectMemberRepository,
     private val passwordEncoder: PasswordEncoder,
     private val transactionTemplate: TransactionTemplate,
     @Value("\${neko.seed.enabled:true}") private val enabled: Boolean,
@@ -53,17 +57,21 @@ class DataSeeder(
 
     private fun seedInternal() {
         val password = passwordEncoder.encode(DEFAULT_PASSWORD)!!
+        val now = LocalDateTime.now()
 
         val users = DEMO_USERS.map { (username, email, nickname, status, role) ->
             userRepository.save(
-                User(
-                    username = username,
-                    password = password,
-                    email = email,
-                    nickname = nickname,
-                    status = status,
-                    role = role,
-                )
+                User().apply {
+                    this.username = username
+                    this.password = password
+                    this.email = email
+                    this.nickname = nickname
+                    this.status = status
+                    this.role = role
+                    // 历史演示账号视为已验证邮箱；设计 §2.2 下拥有项目创建资格
+                    this.emailVerifiedAt = now
+                    this.canCreateProject = true
+                }
             )
         }
         val nicknames = users.map { it.nickname }
@@ -81,21 +89,25 @@ class DataSeeder(
             )
         }
 
-        // 项目条目（含招募需求与标签）
+        // 全局标签字典（分组节点 + 可选叶子 + 独立标签），供 Cascader 与项目关联
+        val tagByName = seedTags()
+
+        // 项目条目（含招募需求与标签）+ OWNER 成员关系（JPA 自动建表，不写迁移）
         val objectItems = DEMO_OBJECTS.mapIndexed { index, def ->
-            objectItemRepository.save(
+            val owner = users[index % users.size]
+            val item = objectItemRepository.save(
                 ObjectItem().apply {
                     title = def.title
-                    type = def.type
                     introduction = def.introduction
                     description = def.description
                     status = def.status
                     leader = def.leader
                     leaderMcId = def.leaderMcId
                     contactInformation = def.contact
-                    controlPassword = password
-                    ownerId = users[index % users.size].id
-                    tags = def.tags.toMutableList()
+                    ownerId = owner.id
+                    createdBy = owner.id
+                    tags = def.tags.mapNotNull { name -> tagByName[name.trim().lowercase(Locale.ROOT)] }
+                        .toCollection(LinkedHashSet())
                     needMembers = def.needMembers.map { (skill, number, ctx) ->
                         NeedMemberItem().apply {
                             this.skill = skill
@@ -105,6 +117,17 @@ class DataSeeder(
                     }.toMutableList()
                 }
             )
+            // 创建者为项目 OWNER 成员
+            projectMemberRepository.save(
+                ProjectMember().apply {
+                    projectId = item.id
+                    userId = owner.id
+                    role = ProjectRole.OWNER
+                    status = MemberStatus.ACTIVE
+                    joinedAt = now
+                }
+            )
+            item
         }
 
         // 项目评论
@@ -149,14 +172,52 @@ class DataSeeder(
         }
     }
 
+    /**
+     * 幂等播种全局标签字典：分组节点（selectable=false）+ 可选叶子 + 独立标签。
+     * 返回 normalizedName → Tag 映射，供项目关联按名称复用。重复执行不会创建重复 Tag。
+     */
+    private fun seedTags(): Map<String, Tag> {
+        val byName = tagRepository.findByDeletedAtIsNull()
+            .associateByTo(mutableMapOf()) { it.normalizedName!! }
+        val now = LocalDateTime.now()
+
+        fun norm(name: String) = name.trim().lowercase(Locale.ROOT)
+
+        fun getOrCreate(name: String, parent: Tag?, selectable: Boolean, sortOrder: Int): Tag {
+            val key = norm(name)
+            byName[key]?.let { return it }
+            val tag = Tag().apply {
+                this.name = name.trim()
+                this.normalizedName = key
+                this.parentId = parent?.id
+                this.selectable = selectable
+                this.sortOrder = sortOrder
+                this.createTime = now
+                this.updateTime = now
+            }
+            return tagRepository.save(tag).also { byName[norm(it.name!!)] = it }
+        }
+
+        TAG_TREE.forEachIndexed { groupOrder, group ->
+            val groupTag = getOrCreate(group.name, parent = null, selectable = false, sortOrder = groupOrder)
+            group.children.forEachIndexed { idx, child ->
+                getOrCreate(child, parent = groupTag, selectable = true, sortOrder = idx)
+            }
+        }
+        STANDALONE_TAGS.forEachIndexed { idx, name ->
+            getOrCreate(name, parent = null, selectable = true, sortOrder = idx)
+        }
+        return byName
+    }
+
     private companion object {
         const val DEFAULT_PASSWORD = "nekobox123"
 
         val DEMO_USERS = listOf(
-            SeedUser("nyaa", "nyaa@nekobox.local", "Nyaako", Status.ACTIVE, Role.PROJECT_MANAGER),
-            SeedUser("shiro", "shiro@nekobox.local", "Shiro", Status.ACTIVE, Role.PROJECT_MANAGER),
-            SeedUser("kuro", "kuro@nekobox.local", "KuroNeko", Status.ACTIVE, Role.PROJECT_MANAGER),
-            SeedUser("frozen", "frozen@nekobox.local", "Frozen", Status.BANNED, Role.PROJECT_MANAGER),
+            SeedUser("nyaa", "nyaa@nekobox.local", "Nyaako", Status.ACTIVE, Role.USER),
+            SeedUser("shiro", "shiro@nekobox.local", "Shiro", Status.ACTIVE, Role.USER),
+            SeedUser("kuro", "kuro@nekobox.local", "KuroNeko", Status.ACTIVE, Role.USER),
+            SeedUser("frozen", "frozen@nekobox.local", "Frozen", Status.BANNED, Role.USER),
         )
 
         val DEMO_MINDS = listOf(
@@ -180,10 +241,18 @@ class DataSeeder(
             ),
         )
 
+        /** Cascader 预设标签树：分组节点不可选，叶子节点可关联项目。 */
+        val TAG_TREE = listOf(
+            SeedTagGroup("项目方向", listOf("建筑", "生电", "红石", "RPG", "生存")),
+            SeedTagGroup("项目周期", listOf("长期", "短期")),
+        )
+
+        /** 不属于任何分组的独立可选标签。 */
+        val STANDALONE_TAGS = listOf("硬核", "剧情")
+
         val DEMO_OBJECTS = listOf(
             SeedObject(
                 title = "云端小镇共建计划",
-                type = "BUILD",
                 introduction = "邀请玩家共同搭建一座云端小镇。",
                 description = "我们正在搭建一座漂浮于天际的小镇，招募建筑党与红石党共同参与。",
                 status = ObjectItemStatus.RECRUITING,
@@ -198,7 +267,6 @@ class DataSeeder(
             ),
             SeedObject(
                 title = "硬核生存服试运营",
-                type = "SURVIVAL",
                 introduction = "高难度生存体验，原版机制加强。",
                 description = "禁用部分作弊指令、加强怪物 AI，追求原版硬核生存体验。",
                 status = ObjectItemStatus.IN_PROGRESS,
@@ -213,7 +281,6 @@ class DataSeeder(
             ),
             SeedObject(
                 title = "剧情 RPG 地图制作",
-                type = "RPG",
                 introduction = "原创剧情 RPG 地图，长期项目。",
                 description = "正在制作一张包含主线剧情与分支任务的 RPG 地图，招募编剧与命令方块玩家。",
                 status = ObjectItemStatus.PREPARING,
@@ -238,10 +305,10 @@ class DataSeeder(
     )
 
     private data class SeedMind(val title: String, val content: String, val mcId: String, val status: MindStatus)
+    private data class SeedTagGroup(val name: String, val children: List<String>)
     private data class SeedNeed(val skill: String, val number: Int, val context: String)
     private data class SeedObject(
         val title: String,
-        val type: String,
         val introduction: String,
         val description: String,
         val status: ObjectItemStatus,

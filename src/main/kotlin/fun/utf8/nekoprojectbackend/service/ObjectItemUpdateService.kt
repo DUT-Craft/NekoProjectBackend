@@ -39,7 +39,10 @@ class ObjectItemUpdateService(
 ) {
 
     @Transactional(readOnly = true)
-    fun findByObjectItem(objectItemId: Int): List<ObjectItemUpdateResponse> {
+    fun findByObjectItem(
+        objectItemId: Int,
+        @Suppress("UNUSED_PARAMETER") status: ObjectItemUpdateStatus? = null,
+    ): List<ObjectItemUpdateResponse> {
         val page = findByObjectItemPage(objectItemId, 0, MAX_UNPAGED_RESULTS)
         if (page.totalElements > MAX_UNPAGED_RESULTS) {
             throw ParamErrorException("项目动态超过 $MAX_UNPAGED_RESULTS 条，请使用分页查询")

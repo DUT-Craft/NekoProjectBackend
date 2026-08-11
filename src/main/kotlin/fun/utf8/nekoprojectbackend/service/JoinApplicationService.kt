@@ -3,36 +3,28 @@ package `fun`.utf8.nekoprojectbackend.service
 import `fun`.utf8.nekoprojectbackend.datasource.jdbc.JoinApplication
 import `fun`.utf8.nekoprojectbackend.datasource.jdbc.JoinApplicationRepository
 import `fun`.utf8.nekoprojectbackend.datasource.jdbc.JoinApplicationStatus
+import `fun`.utf8.nekoprojectbackend.datasource.jdbc.NeedMemberItem
+import `fun`.utf8.nekoprojectbackend.datasource.jdbc.ObjectItemRepository
 import `fun`.utf8.nekoprojectbackend.datasource.jdbc.ObjectItemStatus
+import `fun`.utf8.nekoprojectbackend.handlder.ForbiddenException
 import `fun`.utf8.nekoprojectbackend.handlder.ParamErrorException
-import `fun`.utf8.nekoprojectbackend.handlder.ResourceConflictException
 import `fun`.utf8.nekoprojectbackend.handlder.ResourceNotFoundException
-import jakarta.validation.constraints.NotBlank
-import jakarta.validation.constraints.Size
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
 import java.time.LocalDateTime
 
 data class JoinApplicationSaveRequest(
-    @field:NotBlank(message = "申请人昵称不能为空")
-    @field:Size(max = 64, message = "申请人昵称不能超过 64 个字符")
     val nickName: String = "",
-    @field:NotBlank(message = "申请人 Minecraft ID 不能为空")
-    @field:Size(max = 64, message = "申请人 Minecraft ID 不能超过 64 个字符")
     val mcId: String = "",
-    @field:NotBlank(message = "申请人联系方式不能为空")
-    @field:Size(max = 255, message = "申请人联系方式不能超过 255 个字符")
     val contact: String = "",
-    @field:NotBlank(message = "申请理由不能为空")
-    @field:Size(max = 4000, message = "申请理由不能超过 4000 个字符")
     val reason: String = "",
-    @field:Size(max = 64, message = "申请岗位不能超过 64 个字符")
     val skill: String? = null,
 )
 
 data class JoinApplicationResponse(
     val id: Int?,
     val objectItemId: Int?,
+    val applicantUserId: Long? = null,
     val nickName: String?,
     val mcId: String?,
     val contact: String?,
@@ -47,55 +39,32 @@ data class JoinApplicationResponse(
 /** 加入申请业务：用户提交入组申请并校验昵称/MC ID/联系方式/理由等字段。 */
 @Service
 class JoinApplicationService(
-    private val objectItemService: ObjectItemService,
+    private val objectItemRepository: ObjectItemRepository,
     private val joinApplicationRepository: JoinApplicationRepository,
-    private val submissionTrackingService: SubmissionTrackingService,
 ) {
 
     @Transactional
-    fun create(objectItemId: Int, request: JoinApplicationSaveRequest): JoinApplicationResponse {
-        return createEntity(objectItemId, request, trackingTokenHash = null).toResponse()
-    }
-
-    @Transactional
-    fun createTracked(
+    fun create(
         objectItemId: Int,
         request: JoinApplicationSaveRequest,
-    ): TrackedSubmission<JoinApplicationResponse> {
-        val issued = submissionTrackingService.issue()
-        val entity = createEntity(objectItemId, request, issued.hash)
-        return TrackedSubmission(
-            value = entity.toResponse(),
-            trackingToken = issued.token,
-        )
-    }
-
-    @Transactional(readOnly = true)
-    fun findTracked(objectItemId: Int, applicationId: Int, trackingToken: String): JoinApplicationResponse {
+        applicantUserId: Long? = null,
+    ): JoinApplicationResponse {
         val resolvedItemId = requirePositiveItemId(objectItemId)
-        if (applicationId <= 0) {
-            throw ParamErrorException("加入申请 ID 必须大于 0")
-        }
-        val application = joinApplicationRepository.findById(applicationId)
-            .orElseThrow { ResourceNotFoundException("加入申请不存在或追踪码不正确") }
-        if (application.objectItemId != resolvedItemId ||
-            !submissionTrackingService.matches(trackingToken, application.trackingTokenHash)
-        ) {
-            throw ResourceNotFoundException("加入申请不存在或追踪码不正确")
-        }
-        return application.toResponse()
-    }
+        val item = objectItemRepository.findById(resolvedItemId)
+            .orElseThrow { ResourceNotFoundException("项目条目不存在") }
+        val requestedSkill = requireRecruitingSkill(resolvedItemId, item.status, item.needMembers, request.skill)
 
-    private fun createEntity(
-        objectItemId: Int,
-        request: JoinApplicationSaveRequest,
-        trackingTokenHash: String?,
-    ): JoinApplication {
-        val resolvedItemId = requirePositiveItemId(objectItemId)
-        val selectedSkill = resolveRecruitmentSkill(resolvedItemId, request.skill)
+        // 同一用户对同一项目已有待处理申请则拒绝重复（设计 §9.1）
+        if (applicantUserId != null) {
+            joinApplicationRepository
+                .findByObjectItemIdAndStatus(resolvedItemId, JoinApplicationStatus.PENDING)
+                .firstOrNull { it.applicantUserId == applicantUserId }
+                ?.let { throw ParamErrorException("你已有一个待处理的申请") }
+        }
 
         val entity = JoinApplication().also {
             it.objectItemId = resolvedItemId
+            it.applicantUserId = applicantUserId
             it.nickName = requireText(
                 request.nickName,
                 "申请人昵称不能为空",
@@ -114,33 +83,64 @@ class JoinApplicationService(
                 MAX_CONTACT_LENGTH,
                 "申请人联系方式不能超过 $MAX_CONTACT_LENGTH 个字符"
             )
-            it.reason = requireText(
-                request.reason,
-                "申请理由不能为空",
-                MAX_REASON_LENGTH,
-                "申请理由不能超过 $MAX_REASON_LENGTH 个字符",
-            )
-            it.skill = selectedSkill
+            it.reason = requireText(request.reason, "申请理由不能为空")
+            it.skill = requestedSkill
             it.status = JoinApplicationStatus.PENDING
-            it.trackingTokenHash = trackingTokenHash
         }
-        return joinApplicationRepository.save(entity)
+        return joinApplicationRepository.save(entity).toResponse()
     }
 
-    private fun resolveRecruitmentSkill(objectItemId: Int, requestedSkill: String?): String {
-        val project = objectItemService.findPublicById(objectItemId)
-        if (project.status != ObjectItemStatus.RECRUITING) {
-            throw ResourceConflictException("项目当前未开放招募")
+    /** 申请人撤回自己的待处理申请（设计 §9.1，状态置 WITHDRAWN）。 */
+    @Transactional
+    fun withdraw(objectItemId: Int, applicationId: Int, applicantUserId: Long): JoinApplicationResponse {
+        val application = joinApplicationRepository.findById(applicationId)
+            .orElseThrow { ResourceNotFoundException("加入申请不存在") }
+        if (application.objectItemId != objectItemId) {
+            throw ResourceNotFoundException("加入申请不存在")
         }
-        val skill = normalizeNullableText(
-            requestedSkill,
+        if (application.applicantUserId != applicantUserId) {
+            throw ForbiddenException("只能撤回自己的申请")
+        }
+        if (application.status != JoinApplicationStatus.PENDING) {
+            throw ParamErrorException("只能撤回待处理的申请")
+        }
+        application.status = JoinApplicationStatus.WITHDRAWN
+        return joinApplicationRepository.save(application).toResponse()
+    }
+
+    private fun requireRecruitingSkill(
+        objectItemId: Int,
+        status: ObjectItemStatus?,
+        needMembers: List<NeedMemberItem>?,
+        rawSkill: String?,
+    ): String {
+        if (status !in PUBLIC_STATUSES) {
+            throw ResourceNotFoundException("项目条目不存在")
+        }
+        if (status != ObjectItemStatus.RECRUITING) {
+            throw ParamErrorException("项目当前不在招募中")
+        }
+        val skill = requireText(
+            rawSkill.orEmpty(),
+            "申请岗位不能为空",
             MAX_SKILL_LENGTH,
             "申请岗位不能超过 $MAX_SKILL_LENGTH 个字符",
-        ) ?: throw ParamErrorException("请选择申请岗位")
-        val need = project.needMembers.firstOrNull {
-            (it.number ?: 0) > 0 && it.skill?.trim()?.equals(skill, ignoreCase = true) == true
-        } ?: throw ParamErrorException("申请岗位不在项目当前招募需求中")
-        return need.skill?.trim().orEmpty()
+        )
+        val matchedNeed = needMembers.orEmpty()
+            .firstOrNull { it.skill?.trim()?.equals(skill, ignoreCase = true) == true }
+            ?: throw ParamErrorException("申请岗位不存在或未开放")
+        val capacity = matchedNeed.number ?: 0L
+        if (capacity <= 0) {
+            throw ParamErrorException("申请岗位暂无名额")
+        }
+        val accepted = joinApplicationRepository
+            .findByObjectItemIdAndStatus(objectItemId, JoinApplicationStatus.ACCEPTED)
+            .count { it.skill?.trim()?.equals(skill, ignoreCase = true) == true }
+            .toLong()
+        if (accepted >= capacity) {
+            throw ParamErrorException("申请岗位名额已满")
+        }
+        return matchedNeed.skill?.trim().orEmpty()
     }
 
     private fun requirePositiveItemId(objectItemId: Int): Int {
@@ -182,6 +182,7 @@ class JoinApplicationService(
         return JoinApplicationResponse(
             id = id,
             objectItemId = objectItemId,
+            applicantUserId = applicantUserId,
             nickName = nickName,
             mcId = mcId,
             contact = contact,
@@ -198,7 +199,6 @@ class JoinApplicationService(
         private const val MAX_NICK_NAME_LENGTH = 64
         private const val MAX_MC_ID_LENGTH = 64
         private const val MAX_CONTACT_LENGTH = 255
-        private const val MAX_REASON_LENGTH = 4_000
         private const val MAX_SKILL_LENGTH = 64
     }
 }

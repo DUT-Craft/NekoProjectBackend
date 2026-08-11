@@ -40,13 +40,13 @@ class JwtAuthenticationFilter(
     private fun authenticate(token: String, req: HttpServletRequest) {
         try {
             val claims = jwtService.parse(token)
-            if (claims.get(CLAIM_TYPE, String::class.java) != TYPE_ACCESS) {
-                req.setAttribute(AUTH_ERROR_ATTR, TokenInvalidException("非访问令牌"))
-                return
-            }
             val jti = claims.id
             if (jti == null || !tokenStore.isAccessValid(jti)) {
                 req.setAttribute(AUTH_ERROR_ATTR, TokenInvalidException("Token 已失效"))
+                return
+            }
+            if (claims.get(CLAIM_TYPE, String::class.java) != TYPE_ACCESS) {
+                req.setAttribute(AUTH_ERROR_ATTR, TokenInvalidException("非访问令牌"))
                 return
             }
             val principal = toPrincipal(claims)
@@ -63,20 +63,13 @@ class JwtAuthenticationFilter(
 
     private fun toPrincipal(claims: Claims): LoginUser {
         val roleName = claims.get(CLAIM_ROLE, String::class.java)
-            ?: throw TokenInvalidException("令牌缺少角色")
-        val role = runCatching { Role.valueOf(roleName) }
-            .getOrElse { throw TokenInvalidException("令牌角色无效") }
-        val userId = claims.subject?.toLongOrNull()
-            ?: throw TokenInvalidException("令牌用户无效")
-        val username = claims.get(CLAIM_USERNAME, String::class.java)
-            ?.takeIf { it.isNotBlank() }
-            ?: throw TokenInvalidException("令牌缺少用户名")
-        val jti = claims.id ?: throw TokenInvalidException("令牌缺少标识")
+        val role = runCatching { roleName?.let { Role.valueOf(it) } }.getOrNull()
+            ?: throw TokenInvalidException("Token 角色无效")
         return LoginUser(
-            id = userId,
-            username = username,
+            id = claims.subject.toLong(),
+            username = claims.get(CLAIM_USERNAME, String::class.java),
             role = role,
-            jti = jti,
+            jti = claims.id,
         )
     }
 

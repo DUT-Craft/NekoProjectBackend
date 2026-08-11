@@ -1,6 +1,8 @@
 package `fun`.utf8.nekoprojectbackend
 
 import `fun`.utf8.nekoprojectbackend.service.TokenStore
+import org.mockito.ArgumentMatchers.eq
+import org.mockito.ArgumentMatchers.startsWith
 import org.junit.jupiter.api.Test
 import org.mockito.Mockito.mock
 import org.mockito.Mockito.verify
@@ -22,15 +24,17 @@ class TokenStoreTest {
     fun `user token indexes receive a ttl when tokens are saved`() {
         `when`(redis.opsForValue()).thenReturn(valueOperations)
         `when`(redis.opsForSet()).thenReturn(setOperations)
-        `when`(redis.getExpire("auth:user:7:sessions")).thenReturn(0L)
-        `when`(redis.getExpire("auth:user:7:refreshes")).thenReturn(0L)
 
         val ttl = Duration.ofSeconds(90)
-        store.saveAccess("access-jti", 7, ttl)
+        store.saveAccess("access-jti", 7, "test-agent", "127.0.0.1", ttl)
         store.saveRefresh("refresh-jti", 7, ttl)
 
-        verify(valueOperations).set("auth:token:access-jti", "7", ttl)
-        verify(valueOperations).set("auth:refresh:refresh-jti", "7", ttl)
+        verify(valueOperations).set(
+            eq("auth:token:access-jti"),
+            startsWith("7|test-agent|127.0.0.1|"),
+            eq(ttl),
+        )
+        verify(valueOperations).set(eq("auth:refresh:refresh-jti"), eq("7"), eq(ttl))
         verify(setOperations).add("auth:user:7:sessions", "access-jti")
         verify(setOperations).add("auth:user:7:refreshes", "refresh-jti")
         verify(redis).expire("auth:user:7:sessions", ttl)

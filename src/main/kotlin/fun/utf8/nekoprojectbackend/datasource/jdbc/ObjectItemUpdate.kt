@@ -21,6 +21,10 @@ class ObjectItemUpdate {
     @Column(name = "object_item_id", nullable = false)
     var objectItemId: Int? = null
 
+    /** 作者用户 ID（users.id）；匿名提交的历史行可为 null（标记为「历史匿名」，设计 §14.12）。 */
+    @Column(name = "author_user_id")
+    var authorUserId: Long? = null
+
     @Column(name = "title", nullable = false, length = 128)
     var title: String? = null
 

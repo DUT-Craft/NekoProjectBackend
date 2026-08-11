@@ -5,8 +5,6 @@ import `fun`.utf8.nekoprojectbackend.datasource.jdbc.ObjectItemCommentRepository
 import `fun`.utf8.nekoprojectbackend.datasource.jdbc.ObjectItemCommentStatus
 import `fun`.utf8.nekoprojectbackend.handlder.ParamErrorException
 import `fun`.utf8.nekoprojectbackend.handlder.ResourceNotFoundException
-import jakarta.validation.constraints.NotBlank
-import jakarta.validation.constraints.Size
 import org.springframework.data.domain.Page
 import org.springframework.data.domain.Pageable
 import org.springframework.data.domain.PageRequest
@@ -14,31 +12,20 @@ import org.springframework.data.domain.Sort
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
 
-data class ObjectItemCommentManageStatusRequest(
-    @field:NotBlank(message = "项目控制密码不能为空")
-    @field:Size(max = 72, message = "项目控制密码不能超过 72 个字符")
-    val controlPassword: String = "",
-    val status: ObjectItemCommentStatus,
+data class ObjectItemCommentPageVO(
+    val content: List<ObjectItemCommentResponse>,
+    val totalElements: Long,
+    val totalPages: Int,
+    val page: Int,
+    val size: Int,
 )
 
-/** 项目评论管理业务：凭项目控制密码查看/审核/删除评论，或管理员直接审核状态。 */
+/** 项目评论管理业务：统一 JWT 鉴权（项目 OWNER/MANAGER 或超管，由 AccessService.ensureCanManage 校验）。 */
 @Service
 class ObjectItemCommentManagementService(
-    private val objectItemManagementService: ObjectItemManagementService,
     private val objectItemCommentRepository: ObjectItemCommentRepository,
 ) {
 
-    @Transactional(readOnly = true)
-    fun list(
-        objectItemId: Int,
-        status: ObjectItemCommentStatus?,
-        request: ObjectItemManageVerifyRequest,
-    ): List<ObjectItemCommentResponse> {
-        verifyProject(objectItemId, request)
-        return listByAdmin(objectItemId, status)
-    }
-
-    /** 管理员查看项目评论：JWT 鉴权（由控制器层保证），无需项目控制密码。 */
     @Transactional(readOnly = true)
     fun listByAdmin(
         objectItemId: Int,
@@ -122,50 +109,24 @@ class ObjectItemCommentManagementService(
     }
 
     @Transactional
-    fun review(
-        objectItemId: Int,
-        commentId: Int,
-        request: ObjectItemCommentManageStatusRequest,
-    ): ObjectItemCommentResponse {
-        verifyProject(objectItemId, request.toVerifyRequest())
-        ensureModerationStatus(request.status)
-        val comment = loadComment(commentId, objectItemId)
-        comment.status = request.status
-        return objectItemCommentRepository.save(comment).toResponse()
-    }
-
-    @Transactional
     fun reviewByAdmin(
         objectItemId: Int,
         commentId: Int,
         status: ObjectItemCommentStatus,
     ): ObjectItemCommentResponse {
-        ensureModerationStatus(status)
         val comment = loadComment(commentId, objectItemId)
         comment.status = status
         return objectItemCommentRepository.save(comment).toResponse()
     }
 
     @Transactional
-    fun delete(
+    fun deleteByAdmin(
         objectItemId: Int,
         commentId: Int,
-        request: ObjectItemManageVerifyRequest,
     ) {
-        verifyProject(objectItemId, request)
         val comment = loadComment(commentId, objectItemId)
         comment.status = ObjectItemCommentStatus.DELETED
         objectItemCommentRepository.save(comment)
-    }
-
-    private fun verifyProject(objectItemId: Int, request: ObjectItemManageVerifyRequest) {
-        objectItemManagementService.verify(objectItemId, request)
-    }
-
-    private fun ensureModerationStatus(status: ObjectItemCommentStatus) {
-        if (status !in MODERATION_STATUSES) {
-            throw ParamErrorException("评论审核状态只能是 APPROVED、REJECTED 或 DELETED")
-        }
     }
 
     private fun loadComment(commentId: Int, objectItemId: Int): ObjectItemComment {
@@ -179,9 +140,6 @@ class ObjectItemCommentManagementService(
         }
         return comment
     }
-
-    private fun ObjectItemCommentManageStatusRequest.toVerifyRequest() =
-        ObjectItemManageVerifyRequest(controlPassword = controlPassword)
 
     private fun ObjectItemComment.toResponse(): ObjectItemCommentResponse {
         return ObjectItemCommentResponse(
@@ -198,10 +156,5 @@ class ObjectItemCommentManagementService(
     private companion object {
         private const val MAX_UNPAGED_RESULTS = 500
         private const val MAX_PAGE_SIZE = 500
-        private val MODERATION_STATUSES = setOf(
-            ObjectItemCommentStatus.APPROVED,
-            ObjectItemCommentStatus.REJECTED,
-            ObjectItemCommentStatus.DELETED,
-        )
     }
 }

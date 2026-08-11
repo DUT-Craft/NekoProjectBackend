@@ -59,6 +59,22 @@ class RateLimiter(
         redis.delete(counterKey("failure", namespace, identity))
     }
 
+    fun recordFailAndCheckLock(
+        namespace: String,
+        identity: String,
+        maxFail: Int,
+        windowSeconds: Long,
+        lockSeconds: Long,
+    ): Boolean = recordFailure(
+        namespace,
+        identity,
+        maxFail,
+        Duration.ofSeconds(windowSeconds),
+        Duration.ofSeconds(lockSeconds),
+    )
+
+    fun clearFails(namespace: String, identity: String) = clearFailures(namespace, identity)
+
     private fun increment(key: String, window: Duration): Long =
         redis.execute(INCREMENT_SCRIPT, listOf(key), window.seconds.toString()) ?: 1L
 

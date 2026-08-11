@@ -30,6 +30,6 @@ data class LoginUser(
 
     companion object {
         fun of(user: User, jti: String) =
-            LoginUser(user.id!!, user.username, requireNotNull(user.role) { "用户缺少角色" }, jti)
+            LoginUser(user.id!!, user.username, user.role, jti)
     }
 }

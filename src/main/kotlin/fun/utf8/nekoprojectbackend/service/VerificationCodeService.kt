@@ -4,7 +4,6 @@ import `fun`.utf8.nekoprojectbackend.config.MailProperties
 import `fun`.utf8.nekoprojectbackend.handlder.BusinessException
 import `fun`.utf8.nekoprojectbackend.handlder.VerificationCodeInvalidException
 import org.springframework.data.redis.core.StringRedisTemplate
-import org.springframework.data.redis.core.script.DefaultRedisScript
 import org.springframework.http.HttpStatus
 import org.springframework.stereotype.Service
 import java.security.MessageDigest
@@ -36,6 +35,8 @@ class VerificationCodeService(
         CHANGE_PASSWORD("修改密码确认"),
         RESET_PASSWORD("找回密码"),
         EMAIL_LOGIN("邮箱验证登录"),
+        RECOVER_USERNAME("找回用户名"),
+        REACTIVATE("恢复停用账号"),
     }
 
     /** 存储验证码时的上下文：已登录带 userId，匿名场景 userId 为 null（只用 email 绑定）。 */
@@ -52,29 +53,33 @@ class VerificationCodeService(
      */
     fun generate(ctx: CodeContext): String {
         val code = randomCode(props.codeLength)
-        redis.execute(
-            STORE_CODE_SCRIPT,
-            listOf(codeKey(ctx), attemptKey(ctx)),
-            code,
-            props.ttlSeconds.coerceAtLeast(1L).toString(),
-        )
+        redis.opsForValue().set(codeKey(ctx), code, Duration.ofSeconds(props.ttlSeconds))
         return code
     }
 
     /**
-     * 校验验证码：匹配则原子删除（一次性消费）并返回 true；不匹配或不存在抛 [VerificationCodeInvalidException]。
+     * 校验验证码：匹配则原子删除（一次性消费）；不匹配累计错误次数，超 [MAX_VERIFY_ATTEMPTS] 作废。
+     * 不存在或已作废抛 [VerificationCodeInvalidException]（设计 §14.10：错误次数限制 + 原子消费）。
      */
     fun verifyAndConsume(ctx: CodeContext, input: String) {
         val key = codeKey(ctx)
-        val consumed = redis.execute(
-            VERIFY_AND_CONSUME_SCRIPT,
-            listOf(key, attemptKey(ctx)),
-            input.trim(),
-            props.maxAttempts.coerceAtLeast(1L).toString(),
-        )
-        if (consumed != 1L) {
+        val stored = redis.opsForValue().get(key)
+        if (stored == null) {
             throw VerificationCodeInvalidException()
         }
+        if (stored != input.trim()) {
+            val errCount = redis.opsForValue().increment(errKey(ctx)) ?: 1L
+            redis.expire(errKey(ctx), Duration.ofSeconds(props.ttlSeconds))
+            if (errCount >= MAX_VERIFY_ATTEMPTS) {
+                // 连续输错超限：作废验证码，防止暴力枚举
+                redis.delete(key)
+                redis.delete(errKey(ctx))
+            }
+            throw VerificationCodeInvalidException()
+        }
+        // 原子消费：校验通过即删除，防止验证码被多次复用
+        redis.delete(key)
+        redis.delete(errKey(ctx))
     }
 
     /**
@@ -111,11 +116,12 @@ class VerificationCodeService(
         return "verify:${ctx.scene}:$identity:ua:${uaHash(ctx.userAgent)}"
     }
 
+    /** 验证码错误次数计数 key（与 [codeKey] 同生命周期，超限作废原码）。 */
+    private fun errKey(ctx: CodeContext): String = "${codeKey(ctx)}:err"
+
     private fun lockKey(email: String) = "verify:lock:email:$email"
 
     private fun dailyKey(email: String) = "verify:daily:email:$email:${LocalDate.now()}"
-
-    private fun attemptKey(ctx: CodeContext) = "${codeKey(ctx)}:attempts"
 
     /** UserAgent 取 SHA-256 前 16 位，既可区分终端又避免 key 过长。 */
     private fun uaHash(userAgent: String): String {
@@ -141,38 +147,7 @@ class VerificationCodeService(
     }
 
     private companion object {
-        val STORE_CODE_SCRIPT = DefaultRedisScript(
-            """
-            redis.call('SET', KEYS[1], ARGV[1], 'EX', ARGV[2])
-            redis.call('DEL', KEYS[2])
-            return 1
-            """.trimIndent(),
-            Long::class.java,
-        )
-
-        val VERIFY_AND_CONSUME_SCRIPT = DefaultRedisScript(
-            """
-            local stored = redis.call('GET', KEYS[1])
-            if not stored then
-                redis.call('DEL', KEYS[2])
-                return 0
-            end
-            if stored == ARGV[1] then
-                redis.call('DEL', KEYS[1], KEYS[2])
-                return 1
-            end
-
-            local attempts = redis.call('INCR', KEYS[2])
-            local ttl = redis.call('TTL', KEYS[1])
-            if ttl > 0 then
-                redis.call('EXPIRE', KEYS[2], ttl)
-            end
-            if attempts >= tonumber(ARGV[2]) then
-                redis.call('DEL', KEYS[1], KEYS[2])
-            end
-            return 0
-            """.trimIndent(),
-            Long::class.java,
-        )
+        /** 单个验证码连续输错上限，超限作废（设计 §14.10）。 */
+        const val MAX_VERIFY_ATTEMPTS = 5
     }
 }

@@ -4,10 +4,7 @@ import `fun`.utf8.nekoprojectbackend.datasource.jdbc.JoinApplication
 import `fun`.utf8.nekoprojectbackend.datasource.jdbc.JoinApplicationRepository
 import `fun`.utf8.nekoprojectbackend.datasource.jdbc.JoinApplicationStatus
 import `fun`.utf8.nekoprojectbackend.handlder.ParamErrorException
-import `fun`.utf8.nekoprojectbackend.handlder.ResourceConflictException
 import `fun`.utf8.nekoprojectbackend.handlder.ResourceNotFoundException
-import jakarta.validation.constraints.NotBlank
-import jakarta.validation.constraints.Size
 import org.springframework.data.domain.Page
 import org.springframework.data.domain.Pageable
 import org.springframework.data.domain.PageRequest
@@ -15,17 +12,8 @@ import org.springframework.data.domain.Sort
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
 
-data class JoinApplicationRejectRequest(
-    @field:NotBlank(message = "项目控制密码不能为空")
-    @field:Size(max = 72, message = "项目控制密码不能超过 72 个字符")
-    val controlPassword: String = "",
-    @field:Size(max = 255, message = "拒绝理由不能超过 255 个字符")
-    val rejectReason: String? = null,
-)
-
-/** 管理员拒绝加入申请请求体：JWT 鉴权下无需项目控制密码，仅携带可选拒绝理由。 */
+/** 管理员拒绝加入申请请求体：JWT 鉴权，仅携带可选拒绝理由。 */
 data class JoinApplicationAdminRejectRequest(
-    @field:Size(max = 255, message = "拒绝理由不能超过 255 个字符")
     val rejectReason: String? = null,
 )
 
@@ -37,24 +25,16 @@ data class JoinApplicationPageVO(
     val size: Int,
 )
 
-/** 加入申请管理业务：凭项目控制密码查看/接受/拒绝申请，或管理员（JWT）直接处理。 */
+/**
+ * 加入申请管理业务：统一走 JWT 鉴权（项目 OWNER/MANAGER 或超管，由 AccessService.ensureCanManage 校验）。
+ * 接受申请时同事务创建 ACTIVE MEMBER（设计 §9.1）。
+ */
 @Service
 class JoinApplicationManagementService(
-    private val objectItemManagementService: ObjectItemManagementService,
     private val joinApplicationRepository: JoinApplicationRepository,
+    private val projectMemberService: ProjectMemberService,
 ) {
 
-    @Transactional(readOnly = true)
-    fun list(
-        objectItemId: Int,
-        status: JoinApplicationStatus?,
-        request: ObjectItemManageVerifyRequest,
-    ): List<JoinApplicationResponse> {
-        verifyProject(objectItemId, request)
-        return listByAdmin(objectItemId, status)
-    }
-
-    /** 管理员查看加入申请：JWT 鉴权（由控制器层保证），无需项目控制密码。 */
     @Transactional(readOnly = true)
     fun listByAdmin(
         objectItemId: Int,
@@ -137,48 +117,28 @@ class JoinApplicationManagementService(
         if (objectItemId <= 0) throw ParamErrorException("项目条目 ID 必须大于 0")
     }
 
-    @Transactional
-    fun accept(
-        objectItemId: Int,
-        applicationId: Int,
-        request: ObjectItemManageVerifyRequest,
-    ): JoinApplicationResponse {
-        verifyProject(objectItemId, request)
-        return acceptByAdmin(objectItemId, applicationId)
-    }
-
-    /** 管理员同意加入申请：JWT 鉴权，无需项目控制密码。 */
+    /** 同意加入申请：JWT 鉴权（由控制器层保证），同事务创建 ACTIVE MEMBER（设计 §9.1）。 */
     @Transactional
     fun acceptByAdmin(
         objectItemId: Int,
         applicationId: Int,
     ): JoinApplicationResponse {
-        val application = loadApplicationForUpdate(applicationId, objectItemId)
-        ensureProcessable(application)
+        val application = loadApplication(applicationId, objectItemId)
         application.status = JoinApplicationStatus.ACCEPTED
-        application.rejectReason = null
-        return joinApplicationRepository.save(application).toResponse()
+        val saved = joinApplicationRepository.save(application)
+        // 同事务创建成员关系；匿名历史申请（applicantUserId=null）跳过
+        saved.applicantUserId?.let { projectMemberService.upsertMemberOnAccept(objectItemId, it) }
+        return saved.toResponse()
     }
 
-    @Transactional
-    fun reject(
-        objectItemId: Int,
-        applicationId: Int,
-        request: JoinApplicationRejectRequest,
-    ): JoinApplicationResponse {
-        verifyProject(objectItemId, ObjectItemManageVerifyRequest(request.controlPassword))
-        return rejectByAdmin(objectItemId, applicationId, request.rejectReason)
-    }
-
-    /** 管理员拒绝加入申请：JWT 鉴权，无需项目控制密码。 */
+    /** 拒绝加入申请：JWT 鉴权。 */
     @Transactional
     fun rejectByAdmin(
         objectItemId: Int,
         applicationId: Int,
         rejectReason: String?,
     ): JoinApplicationResponse {
-        val application = loadApplicationForUpdate(applicationId, objectItemId)
-        ensureProcessable(application)
+        val application = loadApplication(applicationId, objectItemId)
         application.status = JoinApplicationStatus.REJECTED
         application.rejectReason = normalizeRejectReason(rejectReason)
         return joinApplicationRepository.save(application).toResponse()
@@ -192,32 +152,23 @@ class JoinApplicationManagementService(
         return normalized
     }
 
-    private fun verifyProject(objectItemId: Int, request: ObjectItemManageVerifyRequest) {
-        objectItemManagementService.verify(objectItemId, request)
-    }
-
-    private fun loadApplicationForUpdate(applicationId: Int, objectItemId: Int): JoinApplication {
+    private fun loadApplication(applicationId: Int, objectItemId: Int): JoinApplication {
         if (applicationId <= 0) {
             throw ParamErrorException("加入申请 ID 必须大于 0")
         }
-        val application = joinApplicationRepository.findByIdForUpdate(applicationId)
-            ?: throw ResourceNotFoundException("加入申请不存在")
+        val application = joinApplicationRepository.findById(applicationId)
+            .orElseThrow { ResourceNotFoundException("加入申请不存在") }
         if (application.objectItemId != objectItemId) {
             throw ResourceNotFoundException("加入申请不存在")
         }
         return application
     }
 
-    private fun ensureProcessable(application: JoinApplication) {
-        if (application.status !in PROCESSABLE_STATUSES) {
-            throw ResourceConflictException("加入申请已处理，不能重复修改结果")
-        }
-    }
-
     private fun JoinApplication.toResponse(): JoinApplicationResponse {
         return JoinApplicationResponse(
             id = id,
             objectItemId = objectItemId,
+            applicantUserId = applicantUserId,
             nickName = nickName,
             mcId = mcId,
             contact = contact,
@@ -234,9 +185,5 @@ class JoinApplicationManagementService(
         private const val MAX_REJECT_REASON_LENGTH = 255
         private const val MAX_UNPAGED_RESULTS = 500
         private const val MAX_PAGE_SIZE = 500
-        private val PROCESSABLE_STATUSES = setOf(
-            JoinApplicationStatus.PENDING,
-            JoinApplicationStatus.CONTACTED,
-        )
     }
 }
