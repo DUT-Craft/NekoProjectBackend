@@ -14,17 +14,39 @@
 
 ## 环境要求
 
-- JDK 25
-- PostgreSQL
-- Redis
+- 推荐：Docker Desktop（包含 Docker Compose）
+- 手动运行时：JDK 25、PostgreSQL、Redis
+
+## 首次本地运行（推荐）
+
+Docker 会自动准备 JDK 25、PostgreSQL、Redis 和开发配置：
+
+```powershell
+docker compose up --build -d
+docker compose ps
+```
+
+等待 `postgres` 和 `redis` 显示 `healthy`，并确认后端日志出现启动完成信息：
+
+```powershell
+docker compose logs -f backend
+```
+
+默认 API 地址为 `http://localhost:8080`，健康检查为 `http://localhost:8080/actuator/health`。停止服务使用：
+
+```powershell
+docker compose down
+```
+
+只有明确需要连同本地开发数据一起清空时才使用 `docker compose down -v`。
+
+## 手动本地运行
 
 开发配置从项目根目录的 `.env` 读取。请先复制示例文件并替换数据库、Redis、JWT 和邮件配置：
 
 ```powershell
 Copy-Item .env.example .env
 ```
-
-## 本地运行
 
 本地默认使用 `ddl-auto=create`，只适合没有需要保留的数据的开发数据库：
 

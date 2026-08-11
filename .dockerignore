@@ -1,0 +1,10 @@
+.git
+.gradle
+.idea
+.kotlin
+build
+docs
+logs
+storage
+.env
+*.iml
