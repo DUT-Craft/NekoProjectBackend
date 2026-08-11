@@ -2,6 +2,8 @@
 
 猫娘社 Minecraft 主站的 Kotlin/Spring Boot 单体后端。项目保留 Controller、Service、Repository、JPA Entity 的原有分层，使用 JWT 认证、Flyway 数据库迁移、PostgreSQL 持久化和 Redis 登录令牌。
 
+配套前端仓库：[DUT-Craft/neko-mc-hub](https://github.com/DUT-Craft/neko-mc-hub)。本仓库是 Gradle 后端项目，根目录应使用 `gradlew` 或 `gradlew.bat`；`npm` 命令属于前端仓库，不要在这里执行。
+
 ## 技术要求
 
 - JDK 25
