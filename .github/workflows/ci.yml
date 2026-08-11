@@ -24,10 +24,11 @@ jobs:
           java-version: "25"
           cache: gradle
 
+      - name: Verify Gradle wrapper permissions
+        run: test -x gradlew
+
       - name: Build and test
-        run: |
-          chmod +x gradlew
-          ./gradlew --no-daemon clean test bootJar
+        run: ./gradlew --no-daemon clean test bootJar
 
       - name: Verify packaged application starts
         shell: bash
