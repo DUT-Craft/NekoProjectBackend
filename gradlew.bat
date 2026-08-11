@@ -19,7 +19,7 @@
 @if "%DEBUG%"=="" @echo off
 @rem ##########################################################################
 @rem
-@rem  gradlew startup script for Windows
+@rem  Gradle startup script for Windows
 @rem
 @rem ##########################################################################
 
@@ -35,8 +35,9 @@ set APP_HOME=%DIRNAME%
 @rem Resolve any "." and ".." in APP_HOME to make it shorter.
 for %%i in ("%APP_HOME%") do set APP_HOME=%%~fi
 
-@rem Add default JVM options here. You can also use JAVA_OPTS and GRADLE_OPTS to pass JVM options to this script.
-set DEFAULT_JVM_OPTS="-Xmx64m" "-Xms64m"
+@rem Gradle test workers use JVM argument files. On Chinese Windows paths those
+@rem files must match the system ANSI charset or the test classpath is corrupted.
+set DEFAULT_JVM_OPTS="-Xmx64m" "-Xms64m" "-Dorg.gradle.jvmargs=-Dfile.encoding=GBK -Xmx512m"
 
 @rem Find java.exe
 if defined JAVA_HOME goto findJavaFromJavaHome
@@ -72,7 +73,7 @@ echo location of your Java installation. 1>&2
 
 
 
-@rem Execute gradlew
+@rem Execute Gradle
 @rem endlocal doesn't take effect until after the line is parsed and variables are expanded
 @rem which allows us to clear the local environment before executing the java command
 endlocal & "%JAVA_EXE%" %DEFAULT_JVM_OPTS% %JAVA_OPTS% %GRADLE_OPTS% "-Dorg.gradle.appname=%APP_BASE_NAME%" -jar "%APP_HOME%\gradle\wrapper\gradle-wrapper.jar" %* & call :exitWithErrorLevel
