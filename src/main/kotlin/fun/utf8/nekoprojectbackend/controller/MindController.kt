@@ -1,14 +1,18 @@
 package `fun`.utf8.nekoprojectbackend.controller
 
 import `fun`.utf8.nekoprojectbackend.datasource.jdbc.MindStatus
+import `fun`.utf8.nekoprojectbackend.security.ClientRequestIdentity
 import `fun`.utf8.nekoprojectbackend.security.LoginUser
 import `fun`.utf8.nekoprojectbackend.service.*
 import `fun`.utf8.nekoprojectbackend.shared.Response
 import `fun`.utf8.nekoprojectbackend.shared.ResponseBuilder
+import jakarta.validation.Valid
+import jakarta.servlet.http.HttpServletRequest
 import org.springframework.http.ResponseEntity
 import org.springframework.security.core.annotation.AuthenticationPrincipal
 import org.springframework.web.bind.annotation.*
 import java.time.LocalDateTime
+import java.time.Duration
 
 /** 想法公开接口（/api/project/minds）。 */
 @RestController
@@ -16,6 +20,8 @@ import java.time.LocalDateTime
 class MindController(
     private val mindService: MindService,
     private val accessService: AccessService,
+    private val rateLimiter: RateLimiter,
+    private val clientRequestIdentity: ClientRequestIdentity,
     private val builder: ResponseBuilder,
 ) {
 
@@ -26,8 +32,15 @@ class MindController(
     }
 
     @PostMapping
-    fun save(@RequestBody request: MindSaveRequest): ResponseEntity<Response> {
-        val mind = mindService.save(request)
+    fun save(
+        @Valid @RequestBody request: MindSaveRequest,
+        servletRequest: HttpServletRequest,
+    ): ResponseEntity<Response> {
+        val clientIp = clientRequestIdentity.clientIp(servletRequest)
+        rateLimiter.consume("public-write-ip", clientIp, MAX_PUBLIC_WRITES_PER_HOUR, RATE_LIMIT_WINDOW)
+        rateLimiter.consume("public-idea-ip", clientIp, MAX_IDEA_SUBMISSIONS_PER_HOUR, RATE_LIMIT_WINDOW)
+        val saved = mindService.saveTracked(request)
+        val mind = saved.value
 
         data class Response(
             val id: Int?,
@@ -38,6 +51,7 @@ class MindController(
             val mcId: String?,
             val createTime: LocalDateTime?,
             val updateTime: LocalDateTime?,
+            val trackingToken: String,
         )
 
         val rs = Response(
@@ -49,13 +63,34 @@ class MindController(
             mcId = mind.mcId,
             createTime = mind.createTime,
             updateTime = mind.updateTime,
+            trackingToken = saved.trackingToken,
         )
 
         return builder.ok().data(rs).build()
     }
 
+    /** 游客凭提交成功时展示的一次性追踪码查询想法状态。 */
+    @GetMapping("/{id}/status")
+    fun getTrackedStatus(
+        @PathVariable id: Int,
+        @RequestHeader(SUBMISSION_TRACKING_TOKEN_HEADER) trackingToken: String,
+        servletRequest: HttpServletRequest,
+    ): ResponseEntity<Response> {
+        rateLimiter.consume(
+            "tracking-status-ip",
+            clientRequestIdentity.clientIp(servletRequest),
+            MAX_TRACKING_READS_PER_HOUR,
+            RATE_LIMIT_WINDOW,
+        )
+        return builder.ok().data(mindService.findTracked(id, trackingToken)).build()
+    }
+
     @PostMapping("/batch")
-    fun saveBatch(@RequestBody request: MindBatchSaveRequest): ResponseEntity<Response> {
+    fun saveBatch(
+        @AuthenticationPrincipal admin: LoginUser,
+        @RequestBody request: MindBatchSaveRequest,
+    ): ResponseEntity<Response> {
+        accessService.requireSuperAdmin(admin)
         val minds = mindService.saveBatch(request.items)
 
         data class Response(
@@ -87,7 +122,7 @@ class MindController(
 
     @GetMapping("/{id}")
     fun getById(@PathVariable id: Int): ResponseEntity<Response> {
-        val mind = mindService.findById(id)
+        val mind = mindService.findPublicById(id)
 
         data class Response(
             val id: Int?,
@@ -116,7 +151,7 @@ class MindController(
 
     @GetMapping("/status/{status}")
     fun listByStatus(@PathVariable status: MindStatus): ResponseEntity<Response> {
-        val minds = mindService.findByStatus(status)
+        val minds = mindService.findPublicByStatus(status)
 
         data class Response(
             val id: Int?,
@@ -147,7 +182,7 @@ class MindController(
 
     @GetMapping("/statuses")
     fun listByStatuses(@RequestParam statuses: List<MindStatus>): ResponseEntity<Response> {
-        val minds = mindService.findByStatuses(statuses)
+        val minds = mindService.findPublicByStatuses(statuses)
 
         data class Response(
             val id: Int?,
@@ -217,7 +252,7 @@ class MindController(
         )
 
         val rs: Any = if (page != null || size != null) {
-            val vo = mindService.queryPage(request, page ?: 0, size ?: DEFAULT_PAGE_SIZE, sort ?: DEFAULT_SORT)
+            val vo = mindService.queryPublicPage(request, page ?: 0, size ?: DEFAULT_PAGE_SIZE, sort ?: DEFAULT_SORT)
             PageResponse(
                 content = vo.content.map {
                     Response(
@@ -237,7 +272,7 @@ class MindController(
                 size = vo.size,
             )
         } else {
-            mindService.query(request).map {
+            mindService.queryPublic(request).map {
                 Response(
                     id = it.id,
                     title = it.title,
@@ -255,7 +290,11 @@ class MindController(
     }
 
     @PostMapping("/query")
-    fun query(@RequestBody request: MindQueryRequest): ResponseEntity<Response> {
+    fun query(
+        @AuthenticationPrincipal admin: LoginUser,
+        @Valid @RequestBody request: MindQueryRequest,
+    ): ResponseEntity<Response> {
+        accessService.requireSuperAdmin(admin)
         val minds = mindService.query(request)
 
         data class Response(
@@ -289,7 +328,7 @@ class MindController(
     fun update(
         @AuthenticationPrincipal admin: LoginUser,
         @PathVariable id: Int,
-        @RequestBody request: MindUpdateRequest,
+        @Valid @RequestBody request: MindUpdateRequest,
     ): ResponseEntity<Response> {
         accessService.requireSuperAdmin(admin)
         val mind = mindService.update(id, request)
@@ -322,7 +361,7 @@ class MindController(
     @PutMapping("/batch")
     fun updateBatch(
         @AuthenticationPrincipal admin: LoginUser,
-        @RequestBody request: MindBatchUpdateRequest,
+        @Valid @RequestBody request: MindBatchUpdateRequest,
     ): ResponseEntity<Response> {
         accessService.requireSuperAdmin(admin)
         val minds = mindService.updateBatch(request.items)
@@ -378,7 +417,7 @@ class MindController(
     @DeleteMapping("/batch")
     fun deleteBatch(
         @AuthenticationPrincipal admin: LoginUser,
-        @RequestBody request: MindBatchDeleteRequest,
+        @Valid @RequestBody request: MindBatchDeleteRequest,
     ): ResponseEntity<Response> {
         accessService.requireSuperAdmin(admin)
         mindService.deleteBatch(request.ids)
@@ -399,5 +438,9 @@ class MindController(
     private companion object {
         const val DEFAULT_PAGE_SIZE = 20
         const val DEFAULT_SORT = "createTime,desc"
+        const val MAX_PUBLIC_WRITES_PER_HOUR = 80
+        const val MAX_IDEA_SUBMISSIONS_PER_HOUR = 20
+        const val MAX_TRACKING_READS_PER_HOUR = 120
+        val RATE_LIMIT_WINDOW: Duration = Duration.ofHours(1)
     }
 }

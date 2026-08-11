@@ -9,6 +9,7 @@ import org.springframework.security.core.context.SecurityContextHolder
 import org.springframework.stereotype.Service
 import org.springframework.web.context.request.RequestContextHolder
 import org.springframework.web.context.request.ServletRequestAttributes
+import tools.jackson.databind.ObjectMapper
 import java.io.File
 import java.nio.charset.StandardCharsets
 import java.nio.file.Files
@@ -33,6 +34,7 @@ import java.util.concurrent.TimeUnit
  */
 @Service
 class OperationLogService(
+    private val objectMapper: ObjectMapper,
     @Value("\${neko.audit.log-path:./logs/operation.log}") private val logPath: String,
     @Value("\${neko.audit.max-size-mb:50}") private val maxSizeMb: Long,
     @Value("\${neko.audit.max-archives:30}") private val maxArchives: Int,
@@ -78,7 +80,12 @@ class OperationLogService(
         // 上下文必须在请求线程同步抓取（异步线程上 ThreadLocal 已失效）
         val (opId, opName, opRole) = resolveOperator(operatorId, operatorName, operatorRole)
         val ip = currentIp()
-        val line = buildJson(opId, opName, opRole, action, targetType, targetId, description, ip, success, error)
+        val line = runCatching {
+            buildJson(opId, opName, opRole, action, targetType, targetId, description, ip, success, error)
+        }.getOrElse {
+            appLog.error("序列化操作日志失败: ${it.message}", it)
+            return
+        }
         writer.execute {
             runCatching { appendLine(line) }
                 .onFailure { appLog.error("写入操作日志失败: ${it.message}", it) }
@@ -167,43 +174,20 @@ class OperationLogService(
         action: String, targetType: String?, targetId: Any?, description: String,
         ip: String?, success: Boolean, error: String?,
     ): String {
-        val sb = StringBuilder(256)
-        sb.append("{\"time\":\"").append(escape(Instant.now().toString())).append('"')
-        sb.raw("operatorId", operatorId)
-        sb.str("operatorName", operatorName)
-        sb.str("operatorRole", operatorRole)
-        sb.str("action", action)
-        sb.str("targetType", targetType)
-        sb.str("targetId", targetId?.toString())
-        sb.str("description", description)
-        sb.str("ip", ip)
-        sb.bool("success", success)
-        sb.str("error", error)
-        sb.append('}')
-        return sb.toString()
+        return objectMapper.writeValueAsString(
+            linkedMapOf(
+                "time" to Instant.now().toString(),
+                "operatorId" to operatorId,
+                "operatorName" to operatorName,
+                "operatorRole" to operatorRole,
+                "action" to action,
+                "targetType" to targetType,
+                "targetId" to targetId?.toString(),
+                "description" to description,
+                "ip" to ip,
+                "success" to success,
+                "error" to error,
+            ),
+        )
     }
-
-    private fun StringBuilder.str(key: String, value: String?) {
-        append(',').append('"').append(key).append("\":")
-        if (value == null) {
-            append("null")
-        } else {
-            append('"').append(escape(value)).append('"')
-        }
-    }
-
-    private fun StringBuilder.raw(key: String, value: Any?) {
-        append(',').append('"').append(key).append("\":").append(value?.toString() ?: "null")
-    }
-
-    private fun StringBuilder.bool(key: String, value: Boolean) {
-        append(',').append('"').append(key).append("\":").append(value)
-    }
-
-    private fun escape(s: String): String = s
-        .replace("\\", "\\\\")
-        .replace("\"", "\\\"")
-        .replace("\n", "\\n")
-        .replace("\r", "\\r")
-        .replace("\t", "\\t")
 }

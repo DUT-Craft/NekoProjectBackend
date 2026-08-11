@@ -3,11 +3,16 @@ package `fun`.utf8.nekoprojectbackend.controller
 import `fun`.utf8.nekoprojectbackend.datasource.jdbc.Role
 import `fun`.utf8.nekoprojectbackend.datasource.jdbc.Status
 import `fun`.utf8.nekoprojectbackend.security.LoginUser
+import `fun`.utf8.nekoprojectbackend.handlder.ParamErrorException
 import `fun`.utf8.nekoprojectbackend.service.AccessService
 import `fun`.utf8.nekoprojectbackend.service.OperationLogService
 import `fun`.utf8.nekoprojectbackend.service.UserService
 import `fun`.utf8.nekoprojectbackend.shared.Response
 import `fun`.utf8.nekoprojectbackend.shared.ResponseBuilder
+import jakarta.validation.Validator
+import jakarta.validation.constraints.Email
+import jakarta.validation.constraints.NotBlank
+import jakarta.validation.constraints.Size
 import org.springframework.http.ResponseEntity
 import org.springframework.security.core.annotation.AuthenticationPrincipal
 import org.springframework.web.bind.annotation.*
@@ -27,11 +32,18 @@ class AdminUserController(
     private val accessService: AccessService,
     private val operationLogService: OperationLogService,
     private val builder: ResponseBuilder,
+    private val validator: Validator,
 ) {
 
     data class CreateUserRequest(
+        @field:NotBlank(message = "用户名不能为空")
+        @field:Size(max = 64, message = "用户名不能超过 64 个字符")
         val username: String,
+        @field:Size(min = 8, max = 72, message = "密码长度必须为 8 到 72 个字符")
         val password: String,
+        @field:NotBlank(message = "邮箱不能为空")
+        @field:Email(message = "邮箱格式不正确")
+        @field:Size(max = 128, message = "邮箱不能超过 128 个字符")
         val email: String,
         val role: Role = Role.PROJECT_MANAGER,
     )
@@ -43,6 +55,7 @@ class AdminUserController(
     ): ResponseEntity<Response> {
         // 仅总管理可创建用户（基于角色判定，而非用户名字符串——后者在 neko.admin.username 改名后失效）
         accessService.requireSuperAdmin(admin)
+        validator.validate(req).firstOrNull()?.let { throw ParamErrorException(it.message) }
         val user = userService.createUser(req.username, req.password, req.email, req.role)
         operationLogService.record(
             operator = admin,

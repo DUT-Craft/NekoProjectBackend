@@ -9,6 +9,7 @@ import `fun`.utf8.nekoprojectbackend.service.ObjectItemUpdateManagementService
 import `fun`.utf8.nekoprojectbackend.service.OperationLogService
 import `fun`.utf8.nekoprojectbackend.shared.Response
 import `fun`.utf8.nekoprojectbackend.shared.ResponseBuilder
+import jakarta.validation.Valid
 import org.springframework.http.ResponseEntity
 import org.springframework.security.core.annotation.AuthenticationPrincipal
 import org.springframework.web.bind.annotation.*
@@ -28,7 +29,7 @@ class AdminObjectItemModerationController(
         @AuthenticationPrincipal admin: LoginUser,
         @PathVariable id: Int,
         @PathVariable commentId: Int,
-        @RequestBody request: CommentStatusRequest,
+        @Valid @RequestBody request: CommentStatusRequest,
     ): ResponseEntity<Response> {
         accessService.ensureCanManage(admin, id)
         val comment = objectItemCommentManagementService.reviewByAdmin(id, commentId, request.status)
@@ -47,7 +48,7 @@ class AdminObjectItemModerationController(
         @AuthenticationPrincipal admin: LoginUser,
         @PathVariable id: Int,
         @PathVariable updateId: Int,
-        @RequestBody request: UpdateStatusRequest,
+        @Valid @RequestBody request: UpdateStatusRequest,
     ): ResponseEntity<Response> {
         accessService.ensureCanManage(admin, id)
         val update = objectItemUpdateManagementService.reviewByAdmin(id, updateId, request.status)
@@ -62,10 +63,10 @@ class AdminObjectItemModerationController(
     }
 
     data class CommentStatusRequest(
-        val status: ObjectItemCommentStatus = ObjectItemCommentStatus.APPROVED,
+        val status: ObjectItemCommentStatus,
     )
 
     data class UpdateStatusRequest(
-        val status: ObjectItemUpdateStatus = ObjectItemUpdateStatus.APPROVED,
+        val status: ObjectItemUpdateStatus,
     )
 }

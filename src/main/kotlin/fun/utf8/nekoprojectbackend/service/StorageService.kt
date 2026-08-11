@@ -37,8 +37,14 @@ class StorageService(
         val target = resolveAndGuard(relative)
 
         Files.createDirectories(target.parent)
-        file.inputStream.use { input ->
-            Files.copy(input, target, StandardCopyOption.REPLACE_EXISTING)
+        try {
+            file.inputStream.use { input ->
+                Files.copy(input, target, StandardCopyOption.REPLACE_EXISTING)
+            }
+        } catch (ex: Exception) {
+            // 复制中断时也清掉可能留下的半文件，避免后续被误当成完整资源读取。
+            runCatching { Files.deleteIfExists(target) }
+            throw ex
         }
         return relative
     }

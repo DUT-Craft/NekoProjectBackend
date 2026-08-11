@@ -6,6 +6,7 @@ import `fun`.utf8.nekoprojectbackend.security.LoginUser
 import `fun`.utf8.nekoprojectbackend.service.*
 import `fun`.utf8.nekoprojectbackend.shared.Response
 import `fun`.utf8.nekoprojectbackend.shared.ResponseBuilder
+import jakarta.validation.Valid
 import org.springframework.http.ResponseEntity
 import org.springframework.security.core.annotation.AuthenticationPrincipal
 import org.springframework.web.bind.annotation.*
@@ -23,6 +24,15 @@ class AdminObjectItemController(
     private val operationLogService: OperationLogService,
     private val builder: ResponseBuilder,
 ) {
+    @GetMapping("/{id}")
+    fun getById(
+        @AuthenticationPrincipal admin: LoginUser,
+        @PathVariable id: Int,
+    ): ResponseEntity<Response> {
+        accessService.ensureCanManage(admin, id)
+        return builder.ok().data(objectItemService.findById(id)).build()
+    }
+
     @GetMapping
     fun list(
         @AuthenticationPrincipal admin: LoginUser,
@@ -70,13 +80,14 @@ class AdminObjectItemController(
     @PostMapping
     fun create(
         @AuthenticationPrincipal admin: LoginUser,
-        @RequestBody request: ObjectItemSaveRequest,
+        @Valid @RequestBody request: ObjectItemSaveRequest,
     ): ResponseEntity<Response> {
-        val status = if (admin.role == Role.SUPER_ADMIN) {
+        val requestedStatus = if (admin.role == Role.SUPER_ADMIN) {
             request.status ?: ObjectItemStatus.RECRUITING
         } else {
             ObjectItemStatus.PENDING
         }
+        val status = if (requestedStatus == ObjectItemStatus.APPROVED) ObjectItemStatus.PREPARING else requestedStatus
         val item = objectItemService.saveOwned(request, admin.id, status)
         operationLogService.record(
             operator = admin,
@@ -91,11 +102,19 @@ class AdminObjectItemController(
     @PutMapping("/batch/status")
     fun batchStatus(
         @AuthenticationPrincipal admin: LoginUser,
-        @RequestBody request: AdminBatchStatusRequest<ObjectItemStatus>,
+        @Valid @RequestBody request: AdminBatchStatusRequest<ObjectItemStatus>,
     ): ResponseEntity<Response> {
-        request.ids.forEach { accessService.ensureCanManage(admin, it) }
+        request.ids.forEach {
+            val current = accessService.ensureCanManage(admin, it)
+            accessService.ensureCanSetProjectStatus(admin, current.status, request.status)
+        }
+        val effectiveStatus = if (request.status == ObjectItemStatus.APPROVED) {
+            ObjectItemStatus.PREPARING
+        } else {
+            request.status
+        }
         val updateRequests = request.ids.map {
-            ObjectItemUpdateRequest(id = it, status = request.status)
+            ObjectItemUpdateRequest(id = it, status = effectiveStatus)
         }
         objectItemService.updateBatch(updateRequests)
         operationLogService.record(
@@ -103,7 +122,7 @@ class AdminObjectItemController(
             action = "PROJECT_STATUS_BATCH",
             targetType = "PROJECT",
             targetId = request.ids,
-            description = "批量改项目状态为 ${request.status}：$request.ids",
+            description = "批量改项目状态为 $effectiveStatus：$request.ids",
         )
 
         data class BatchResult(
@@ -115,7 +134,7 @@ class AdminObjectItemController(
         val rs = BatchResult(
             updated = true,
             ids = request.ids,
-            status = request.status,
+            status = effectiveStatus,
         )
         return builder.ok().data(rs).build()
     }

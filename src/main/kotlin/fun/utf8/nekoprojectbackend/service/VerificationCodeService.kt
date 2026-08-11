@@ -4,6 +4,7 @@ import `fun`.utf8.nekoprojectbackend.config.MailProperties
 import `fun`.utf8.nekoprojectbackend.handlder.BusinessException
 import `fun`.utf8.nekoprojectbackend.handlder.VerificationCodeInvalidException
 import org.springframework.data.redis.core.StringRedisTemplate
+import org.springframework.data.redis.core.script.DefaultRedisScript
 import org.springframework.http.HttpStatus
 import org.springframework.stereotype.Service
 import java.security.MessageDigest
@@ -51,7 +52,12 @@ class VerificationCodeService(
      */
     fun generate(ctx: CodeContext): String {
         val code = randomCode(props.codeLength)
-        redis.opsForValue().set(codeKey(ctx), code, Duration.ofSeconds(props.ttlSeconds))
+        redis.execute(
+            STORE_CODE_SCRIPT,
+            listOf(codeKey(ctx), attemptKey(ctx)),
+            code,
+            props.ttlSeconds.coerceAtLeast(1L).toString(),
+        )
         return code
     }
 
@@ -60,12 +66,15 @@ class VerificationCodeService(
      */
     fun verifyAndConsume(ctx: CodeContext, input: String) {
         val key = codeKey(ctx)
-        val stored = redis.opsForValue().get(key)
-        if (stored == null || stored != input.trim()) {
+        val consumed = redis.execute(
+            VERIFY_AND_CONSUME_SCRIPT,
+            listOf(key, attemptKey(ctx)),
+            input.trim(),
+            props.maxAttempts.coerceAtLeast(1L).toString(),
+        )
+        if (consumed != 1L) {
             throw VerificationCodeInvalidException()
         }
-        // 原子消费：校验通过即删除，防止验证码被多次复用
-        redis.delete(key)
     }
 
     /**
@@ -106,6 +115,8 @@ class VerificationCodeService(
 
     private fun dailyKey(email: String) = "verify:daily:email:$email:${LocalDate.now()}"
 
+    private fun attemptKey(ctx: CodeContext) = "${codeKey(ctx)}:attempts"
+
     /** UserAgent 取 SHA-256 前 16 位，既可区分终端又避免 key 过长。 */
     private fun uaHash(userAgent: String): String {
         val digest = MessageDigest.getInstance("SHA-256")
@@ -127,5 +138,41 @@ class VerificationCodeService(
         val now = java.time.LocalTime.now()
         val endOfDay = java.time.LocalTime.MAX
         return Duration.between(now, endOfDay).seconds + 1
+    }
+
+    private companion object {
+        val STORE_CODE_SCRIPT = DefaultRedisScript(
+            """
+            redis.call('SET', KEYS[1], ARGV[1], 'EX', ARGV[2])
+            redis.call('DEL', KEYS[2])
+            return 1
+            """.trimIndent(),
+            Long::class.java,
+        )
+
+        val VERIFY_AND_CONSUME_SCRIPT = DefaultRedisScript(
+            """
+            local stored = redis.call('GET', KEYS[1])
+            if not stored then
+                redis.call('DEL', KEYS[2])
+                return 0
+            end
+            if stored == ARGV[1] then
+                redis.call('DEL', KEYS[1], KEYS[2])
+                return 1
+            end
+
+            local attempts = redis.call('INCR', KEYS[2])
+            local ttl = redis.call('TTL', KEYS[1])
+            if ttl > 0 then
+                redis.call('EXPIRE', KEYS[2], ttl)
+            end
+            if attempts >= tonumber(ARGV[2]) then
+                redis.call('DEL', KEYS[1], KEYS[2])
+            end
+            return 0
+            """.trimIndent(),
+            Long::class.java,
+        )
     }
 }

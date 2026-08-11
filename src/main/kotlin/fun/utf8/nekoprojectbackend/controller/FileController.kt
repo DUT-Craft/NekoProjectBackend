@@ -2,6 +2,7 @@ package `fun`.utf8.nekoprojectbackend.controller
 
 import `fun`.utf8.nekoprojectbackend.datasource.jdbc.FileCategory
 import `fun`.utf8.nekoprojectbackend.security.LoginUser
+import `fun`.utf8.nekoprojectbackend.service.AccessService
 import `fun`.utf8.nekoprojectbackend.service.FileService
 import `fun`.utf8.nekoprojectbackend.shared.Response
 import `fun`.utf8.nekoprojectbackend.shared.ResponseBuilder
@@ -18,16 +19,18 @@ import org.springframework.web.multipart.MultipartFile
 @RequestMapping("/api/files")
 class FileController(
     private val fileService: FileService,
+    private val accessService: AccessService,
     private val builder: ResponseBuilder,
 ) {
     /** 上传：multipart/form-data，字段名 file，type 取 IMAGE|DOCUMENT。 */
-    @PostMapping(consumes = [MediaType.MULTIPART_FORM_DATA_VALUE])
+    @PostMapping(value = ["", "/upload"], consumes = [MediaType.MULTIPART_FORM_DATA_VALUE])
     fun upload(
         @RequestPart("file") file: MultipartFile,
         @RequestParam type: FileCategory,
         @RequestParam(required = false) objectItemId: Int?,
-        @AuthenticationPrincipal user: LoginUser?,
+        @AuthenticationPrincipal user: LoginUser,
     ): ResponseEntity<Response> {
+        objectItemId?.let { accessService.ensureCanManage(user, it) }
         val result = fileService.upload(file, type, user, objectItemId)
         return builder.ok().data(result).build()
     }
@@ -62,19 +65,19 @@ class FileController(
         // <img> 标签加载封面图不受 Content-Disposition 影响，仍可正常显示。
         val isSvg = record.mimeType?.equals("image/svg+xml", ignoreCase = true) == true ||
                 record.extension?.equals("svg", ignoreCase = true) == true
-        val disposition = if (inline && !isSvg) "inline" else "attachment"
-        val contentType = MediaType.parseMediaType(record.mimeType ?: MediaType.APPLICATION_OCTET_STREAM_VALUE)
+        val isSafeInlineImage = record.category == FileCategory.IMAGE &&
+                record.mimeType?.startsWith("image/", ignoreCase = true) == true &&
+                !isSvg
+        val disposition = if (inline && isSafeInlineImage) "inline" else "attachment"
+        val contentType = runCatching {
+            MediaType.parseMediaType(record.mimeType ?: MediaType.APPLICATION_OCTET_STREAM_VALUE)
+        }.getOrDefault(MediaType.APPLICATION_OCTET_STREAM)
         return ResponseEntity.ok()
             .contentType(contentType)
             .header(HttpHeaders.CONTENT_DISPOSITION, buildContentDisposition(disposition, record.originalName))
             .contentLength(record.size ?: -1)
             .header("X-Content-Type-Options", "nosniff")
-            .apply {
-                if (isSvg) {
-                    // 即便被内联渲染，CSP 阻止脚本执行与外部资源引用
-                    header("Content-Security-Policy", "default-src 'none'")
-                }
-            }
+            .header("Content-Security-Policy", "default-src 'none'; sandbox")
             .body(InputStreamResource(stream))
     }
 

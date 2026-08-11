@@ -2,6 +2,7 @@ package `fun`.utf8.nekoprojectbackend.controller
 
 import `fun`.utf8.nekoprojectbackend.datasource.jdbc.Role
 import `fun`.utf8.nekoprojectbackend.handlder.TokenInvalidException
+import `fun`.utf8.nekoprojectbackend.security.ClientRequestIdentity
 import `fun`.utf8.nekoprojectbackend.security.LoginUser
 import `fun`.utf8.nekoprojectbackend.security.RefreshCookie
 import `fun`.utf8.nekoprojectbackend.service.AuthService
@@ -9,6 +10,7 @@ import `fun`.utf8.nekoprojectbackend.service.OperationLogService
 import `fun`.utf8.nekoprojectbackend.shared.Response
 import `fun`.utf8.nekoprojectbackend.shared.ResponseBuilder
 import jakarta.servlet.http.HttpServletRequest
+import jakarta.validation.Valid
 import org.springframework.http.ResponseEntity
 import org.springframework.security.core.annotation.AuthenticationPrincipal
 import org.springframework.web.bind.annotation.*
@@ -21,12 +23,16 @@ class AuthController(
     private val refreshCookie: RefreshCookie,
     private val builder: ResponseBuilder,
     private val operationLogService: OperationLogService,
+    private val clientRequestIdentity: ClientRequestIdentity,
 ) {
 
     @PostMapping("/login")
-    fun login(@RequestBody req: AuthService.LoginRequest): ResponseEntity<Response> {
+    fun login(
+        @Valid @RequestBody req: AuthService.LoginRequest,
+        request: HttpServletRequest,
+    ): ResponseEntity<Response> {
         val result = try {
-            authService.login(req)
+            authService.login(req, clientRequestIdentity.clientIp(request))
         } catch (e: Exception) {
             operationLogService.record(
                 action = "LOGIN",
@@ -59,12 +65,12 @@ class AuthController(
     /** 邮箱验证登录：邮箱 + 密码 + 邮箱验证码。 */
     @PostMapping("/login/email")
     fun loginByEmail(
-        @RequestBody req: AuthService.EmailLoginRequest,
+        @Valid @RequestBody req: AuthService.EmailLoginRequest,
         request: HttpServletRequest,
     ): ResponseEntity<Response> {
         val userAgent = request.getHeader("User-Agent") ?: ""
         val result = try {
-            authService.loginByEmail(req, userAgent)
+            authService.loginByEmail(req, userAgent, clientRequestIdentity.clientIp(request))
         } catch (e: Exception) {
             operationLogService.record(
                 action = "EMAIL_LOGIN",
@@ -119,12 +125,12 @@ class AuthController(
 
     @PostMapping("/register/manager")
     fun registerManager(
-        @RequestBody req: AuthService.RegisterManagerRequest,
+        @Valid @RequestBody req: AuthService.RegisterManagerRequest,
         request: HttpServletRequest,
     ): ResponseEntity<Response> {
         val userAgent = request.getHeader("User-Agent") ?: ""
         val result = try {
-            authService.registerManager(req, userAgent)
+            authService.registerManager(req, userAgent, clientRequestIdentity.clientIp(request))
         } catch (e: Exception) {
             operationLogService.record(
                 action = "PM_REGISTER",
@@ -154,22 +160,28 @@ class AuthController(
         return builder.ok().data(rs).build()
     }
 
-    /** 发送邮箱验证码：公开接口，按 scene+email(+userId) 绑定 UserAgent 存 Redis。 */
+    /** 发送邮箱验证码：公开接口；匿名场景按邮箱绑定，改密场景由服务端绑定当前用户。 */
     @PostMapping("/verification-code")
     fun sendVerificationCode(
-        @RequestBody req: AuthService.SendCodeRequest,
+        @AuthenticationPrincipal user: LoginUser?,
+        @Valid @RequestBody req: AuthService.SendCodeRequest,
         request: HttpServletRequest,
     ): ResponseEntity<Response> {
         val userAgent = request.getHeader("User-Agent") ?: ""
-        authService.sendVerificationCode(req, userAgent)
-        return builder.ok().message("验证码已发送，请查收邮件").build()
+        authService.sendVerificationCode(
+            req,
+            userAgent,
+            user?.id,
+            clientRequestIdentity.clientIp(request),
+        )
+        return builder.ok().message("如果邮箱可用于此操作，验证码将发送至该邮箱").build()
     }
 
     /** 修改密码（已登录）：需旧密码 + 邮箱验证码确认。 */
     @PostMapping("/change-password")
     fun changePassword(
         @AuthenticationPrincipal user: LoginUser,
-        @RequestBody req: AuthService.ChangePasswordRequest,
+        @Valid @RequestBody req: AuthService.ChangePasswordRequest,
         request: HttpServletRequest,
     ): ResponseEntity<Response> {
         val userAgent = request.getHeader("User-Agent") ?: ""
@@ -184,11 +196,11 @@ class AuthController(
     /** 找回密码（匿名）：凭邮箱验证码重置密码。 */
     @PostMapping("/reset-password")
     fun resetPassword(
-        @RequestBody req: AuthService.ResetPasswordRequest,
+        @Valid @RequestBody req: AuthService.ResetPasswordRequest,
         request: HttpServletRequest,
     ): ResponseEntity<Response> {
         val userAgent = request.getHeader("User-Agent") ?: ""
-        authService.resetPassword(req, userAgent)
+        authService.resetPassword(req, userAgent, clientRequestIdentity.clientIp(request))
         operationLogService.record(action = "RESET_PASSWORD", operatorName = req.email, description = "找回密码")
         return builder.ok().message("密码已重置，请用新密码登录").build()
     }

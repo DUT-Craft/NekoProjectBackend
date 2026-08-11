@@ -4,14 +4,19 @@ import `fun`.utf8.nekoprojectbackend.datasource.jdbc.JoinApplicationStatus
 import `fun`.utf8.nekoprojectbackend.datasource.jdbc.ObjectItemCommentStatus
 import `fun`.utf8.nekoprojectbackend.datasource.jdbc.ObjectItemStatus
 import `fun`.utf8.nekoprojectbackend.datasource.jdbc.ObjectItemUpdateStatus
+import `fun`.utf8.nekoprojectbackend.handlder.ParamErrorException
+import `fun`.utf8.nekoprojectbackend.security.ClientRequestIdentity
 import `fun`.utf8.nekoprojectbackend.security.LoginUser
 import `fun`.utf8.nekoprojectbackend.service.*
 import `fun`.utf8.nekoprojectbackend.shared.Response
 import `fun`.utf8.nekoprojectbackend.shared.ResponseBuilder
+import jakarta.validation.Valid
+import jakarta.servlet.http.HttpServletRequest
 import org.springframework.http.ResponseEntity
 import org.springframework.security.core.annotation.AuthenticationPrincipal
 import org.springframework.web.bind.annotation.*
 import java.time.LocalDateTime
+import java.time.Duration
 
 /** 项目条目公开接口（/api/project/object-items）：增删改查、评论、动态、加入申请。 */
 @RestController
@@ -23,6 +28,8 @@ class ObjectItemController(
     private val joinApplicationService: JoinApplicationService,
     private val accessService: AccessService,
     private val operationLogService: OperationLogService,
+    private val rateLimiter: RateLimiter,
+    private val clientRequestIdentity: ClientRequestIdentity,
     private val builder: ResponseBuilder,
 ) {
 
@@ -32,9 +39,23 @@ class ObjectItemController(
         return builder.ok().data(count).build()
     }
 
+    @GetMapping("/count/public")
+    fun countPublic(): ResponseEntity<Response> {
+        val count = objectItemService.countPublic()
+        return builder.ok().data(count).build()
+    }
+
     @PostMapping
-    fun save(@RequestBody request: ObjectItemSaveRequest): ResponseEntity<Response> {
-        val item = objectItemService.save(request)
+    fun save(
+        @Valid @RequestBody request: ObjectItemSaveRequest,
+        servletRequest: HttpServletRequest,
+    ): ResponseEntity<Response> {
+        limitAnonymousWrite(servletRequest, "project", MAX_PROJECT_SUBMISSIONS_PER_HOUR)
+        val item = objectItemService.save(
+            request.copy(
+                controlPassword = ProjectControlPasswordPolicy.normalizeRequired(request.controlPassword),
+            ),
+        )
         operationLogService.record(
             action = "PROJECT_CREATE",
             targetType = "PROJECT",
@@ -55,7 +76,7 @@ class ObjectItemController(
             val leaderMcId: String?,
             val contactInformation: String?,
             val coverImageUrl: String?,
-            val hasControlPassword: Boolean,
+            val progress: Int,
         )
 
         val rs = Response(
@@ -71,14 +92,18 @@ class ObjectItemController(
             leaderMcId = item.leaderMcId,
             contactInformation = item.contactInformation,
             coverImageUrl = item.coverImageUrl,
-            hasControlPassword = item.hasControlPassword,
+            progress = item.progress,
         )
 
         return builder.ok().data(rs).build()
     }
 
     @PostMapping("/batch")
-    fun saveBatch(@RequestBody request: ObjectItemBatchSaveRequest): ResponseEntity<Response> {
+    fun saveBatch(
+        @AuthenticationPrincipal admin: LoginUser,
+        @RequestBody request: ObjectItemBatchSaveRequest,
+    ): ResponseEntity<Response> {
+        accessService.requireSuperAdmin(admin)
         val items = objectItemService.saveBatch(request.items)
 
         data class Response(
@@ -94,6 +119,7 @@ class ObjectItemController(
             val leaderMcId: String?,
             val contactInformation: String?,
             val coverImageUrl: String?,
+            val progress: Int,
             val hasControlPassword: Boolean,
         )
 
@@ -111,6 +137,7 @@ class ObjectItemController(
                 leaderMcId = it.leaderMcId,
                 contactInformation = it.contactInformation,
                 coverImageUrl = it.coverImageUrl,
+                progress = it.progress,
                 hasControlPassword = it.hasControlPassword,
             )
         }
@@ -120,7 +147,7 @@ class ObjectItemController(
 
     @GetMapping("/{id}")
     fun getById(@PathVariable id: Int): ResponseEntity<Response> {
-        val item = objectItemService.findById(id)
+        val item = objectItemService.findPublicById(id)
 
         data class Response(
             val id: Int?,
@@ -135,7 +162,7 @@ class ObjectItemController(
             val leaderMcId: String?,
             val contactInformation: String?,
             val coverImageUrl: String?,
-            val hasControlPassword: Boolean,
+            val progress: Int,
         )
 
         val rs = Response(
@@ -151,7 +178,7 @@ class ObjectItemController(
             leaderMcId = item.leaderMcId,
             contactInformation = item.contactInformation,
             coverImageUrl = item.coverImageUrl,
-            hasControlPassword = item.hasControlPassword,
+            progress = item.progress,
         )
 
         return builder.ok().data(rs).build()
@@ -159,7 +186,7 @@ class ObjectItemController(
 
     @GetMapping("/status/{status}")
     fun listByStatus(@PathVariable status: ObjectItemStatus): ResponseEntity<Response> {
-        val items = objectItemService.findByStatus(status)
+        val items = objectItemService.findPublicByStatus(status)
 
         data class Response(
             val id: Int?,
@@ -174,7 +201,7 @@ class ObjectItemController(
             val leaderMcId: String?,
             val contactInformation: String?,
             val coverImageUrl: String?,
-            val hasControlPassword: Boolean,
+            val progress: Int,
         )
 
         val rs = items.map {
@@ -191,7 +218,7 @@ class ObjectItemController(
                 leaderMcId = it.leaderMcId,
                 contactInformation = it.contactInformation,
                 coverImageUrl = it.coverImageUrl,
-                hasControlPassword = it.hasControlPassword,
+                progress = it.progress,
             )
         }
 
@@ -236,7 +263,7 @@ class ObjectItemController(
             val leaderMcId: String?,
             val contactInformation: String?,
             val coverImageUrl: String?,
-            val hasControlPassword: Boolean,
+            val progress: Int,
         )
 
         data class PageResponse(
@@ -248,7 +275,12 @@ class ObjectItemController(
         )
 
         val rs: Any = if (page != null || size != null) {
-            val vo = objectItemService.queryPage(request, page ?: 0, size ?: DEFAULT_PAGE_SIZE, sort ?: DEFAULT_SORT)
+            val vo = objectItemService.queryPublicPage(
+                request,
+                page ?: 0,
+                size ?: DEFAULT_PAGE_SIZE,
+                sort ?: DEFAULT_SORT,
+            )
             PageResponse(
                 content = vo.content.map {
                     Response(
@@ -264,7 +296,7 @@ class ObjectItemController(
                         leaderMcId = it.leaderMcId,
                         contactInformation = it.contactInformation,
                         coverImageUrl = it.coverImageUrl,
-                        hasControlPassword = it.hasControlPassword,
+                        progress = it.progress,
                     )
                 },
                 totalElements = vo.totalElements,
@@ -273,7 +305,7 @@ class ObjectItemController(
                 size = vo.size,
             )
         } else {
-            objectItemService.query(request).map {
+            objectItemService.queryPublic(request).map {
                 Response(
                     id = it.id,
                     title = it.title,
@@ -287,7 +319,7 @@ class ObjectItemController(
                     leaderMcId = it.leaderMcId,
                     contactInformation = it.contactInformation,
                     coverImageUrl = it.coverImageUrl,
-                    hasControlPassword = it.hasControlPassword,
+                    progress = it.progress,
                 )
             }
         }
@@ -296,7 +328,11 @@ class ObjectItemController(
     }
 
     @PostMapping("/query")
-    fun query(@RequestBody request: ObjectItemQueryRequest): ResponseEntity<Response> {
+    fun query(
+        @AuthenticationPrincipal admin: LoginUser,
+        @Valid @RequestBody request: ObjectItemQueryRequest,
+    ): ResponseEntity<Response> {
+        accessService.requireSuperAdmin(admin)
         val items = objectItemService.query(request)
 
         data class Response(
@@ -312,6 +348,7 @@ class ObjectItemController(
             val leaderMcId: String?,
             val contactInformation: String?,
             val coverImageUrl: String?,
+            val progress: Int,
             val hasControlPassword: Boolean,
         )
 
@@ -329,6 +366,7 @@ class ObjectItemController(
                 leaderMcId = it.leaderMcId,
                 contactInformation = it.contactInformation,
                 coverImageUrl = it.coverImageUrl,
+                progress = it.progress,
                 hasControlPassword = it.hasControlPassword,
             )
         }
@@ -340,10 +378,12 @@ class ObjectItemController(
     fun update(
         @AuthenticationPrincipal user: LoginUser,
         @PathVariable id: Int,
-        @RequestBody request: ObjectItemUpdateRequest,
+        @Valid @RequestBody request: ObjectItemUpdateRequest,
     ): ResponseEntity<Response> {
-        accessService.ensureCanManage(user, id)
-        val item = objectItemService.update(id, request)
+        val current = accessService.ensureCanManage(user, id)
+        accessService.ensureCanSetProjectStatus(user, current.status, request.status)
+        // 控制密码只属于项目方自服务接口；JWT 管理更新不得借此改写它。
+        val item = objectItemService.update(id, request.copy(controlPassword = null))
         operationLogService.record(
             action = "PROJECT_UPDATE",
             targetType = "PROJECT",
@@ -364,6 +404,7 @@ class ObjectItemController(
             val leaderMcId: String?,
             val contactInformation: String?,
             val coverImageUrl: String?,
+            val progress: Int,
             val hasControlPassword: Boolean,
         )
 
@@ -380,6 +421,7 @@ class ObjectItemController(
             leaderMcId = item.leaderMcId,
             contactInformation = item.contactInformation,
             coverImageUrl = item.coverImageUrl,
+            progress = item.progress,
             hasControlPassword = item.hasControlPassword,
         )
 
@@ -389,10 +431,15 @@ class ObjectItemController(
     @PutMapping("/batch")
     fun updateBatch(
         @AuthenticationPrincipal user: LoginUser,
-        @RequestBody request: ObjectItemBatchUpdateRequest,
+        @Valid @RequestBody request: ObjectItemBatchUpdateRequest,
     ): ResponseEntity<Response> {
-        request.items.forEach { it.id?.let { id -> accessService.ensureCanManage(user, id) } }
-        val items = objectItemService.updateBatch(request.items)
+        request.items.forEach {
+            val id = it.id ?: throw ParamErrorException("批量更新时项目条目 ID 不能为空")
+            val current = accessService.ensureCanManage(user, id)
+            accessService.ensureCanSetProjectStatus(user, current.status, it.status)
+        }
+        // 控制密码只属于项目方自服务接口；JWT 管理更新不得借此改写它。
+        val items = objectItemService.updateBatch(request.items.map { it.copy(controlPassword = null) })
 
         data class Response(
             val id: Int?,
@@ -407,6 +454,7 @@ class ObjectItemController(
             val leaderMcId: String?,
             val contactInformation: String?,
             val coverImageUrl: String?,
+            val progress: Int,
             val hasControlPassword: Boolean,
         )
 
@@ -424,6 +472,7 @@ class ObjectItemController(
                 leaderMcId = it.leaderMcId,
                 contactInformation = it.contactInformation,
                 coverImageUrl = it.coverImageUrl,
+                progress = it.progress,
                 hasControlPassword = it.hasControlPassword,
             )
         }
@@ -434,8 +483,9 @@ class ObjectItemController(
     @DeleteMapping("/batch")
     fun deleteBatch(
         @AuthenticationPrincipal user: LoginUser,
-        @RequestBody request: ObjectItemBatchDeleteRequest,
+        @Valid @RequestBody request: ObjectItemBatchDeleteRequest,
     ): ResponseEntity<Response> {
+        accessService.requireSuperAdmin(user)
         request.ids.forEach { accessService.ensureCanManage(user, it) }
         objectItemService.deleteBatch(request.ids)
         operationLogService.record(
@@ -461,10 +511,9 @@ class ObjectItemController(
     @GetMapping("/{id}/updates")
     fun listUpdates(
         @PathVariable id: Int,
-        @RequestParam(required = false) status: ObjectItemUpdateStatus?,
+        @RequestParam(required = false) page: Int?,
+        @RequestParam(required = false) size: Int?,
     ): ResponseEntity<Response> {
-        val updates = objectItemUpdateService.findByObjectItem(id, status)
-
         data class Response(
             val id: Int?,
             val objectItemId: Int?,
@@ -476,17 +525,25 @@ class ObjectItemController(
             val updateTime: LocalDateTime?,
         )
 
-        val rs = updates.map {
-            Response(
-                id = it.id,
-                objectItemId = it.objectItemId,
-                title = it.title,
-                content = it.content,
-                imageUrl = it.imageUrl,
-                status = it.status,
-                createTime = it.createTime,
-                updateTime = it.updateTime,
+        val rs: Any = if (page != null || size != null) {
+            objectItemUpdateService.findByObjectItemPage(
+                id,
+                page ?: DEFAULT_SUBRESOURCE_PAGE,
+                size ?: DEFAULT_SUBRESOURCE_PAGE_SIZE,
             )
+        } else {
+            objectItemUpdateService.findByObjectItem(id).map {
+                Response(
+                    id = it.id,
+                    objectItemId = it.objectItemId,
+                    title = it.title,
+                    content = it.content,
+                    imageUrl = it.imageUrl,
+                    status = it.status,
+                    createTime = it.createTime,
+                    updateTime = it.updateTime,
+                )
+            }
         }
 
         return builder.ok().data(rs).build()
@@ -495,10 +552,9 @@ class ObjectItemController(
     @GetMapping("/{id}/comments")
     fun listComments(
         @PathVariable id: Int,
-        @RequestParam(required = false) status: ObjectItemCommentStatus?,
+        @RequestParam(required = false) page: Int?,
+        @RequestParam(required = false) size: Int?,
     ): ResponseEntity<Response> {
-        val comments = objectItemCommentService.findByObjectItem(id, status)
-
         data class Response(
             val id: Int?,
             val objectItemId: Int?,
@@ -509,16 +565,24 @@ class ObjectItemController(
             val updateTime: LocalDateTime?,
         )
 
-        val rs = comments.map {
-            Response(
-                id = it.id,
-                objectItemId = it.objectItemId,
-                nickName = it.nickName,
-                content = it.content,
-                status = it.status,
-                createTime = it.createTime,
-                updateTime = it.updateTime,
+        val rs: Any = if (page != null || size != null) {
+            objectItemCommentService.findByObjectItemPage(
+                id,
+                page ?: DEFAULT_SUBRESOURCE_PAGE,
+                size ?: DEFAULT_SUBRESOURCE_PAGE_SIZE,
             )
+        } else {
+            objectItemCommentService.findByObjectItem(id).map {
+                Response(
+                    id = it.id,
+                    objectItemId = it.objectItemId,
+                    nickName = it.nickName,
+                    content = it.content,
+                    status = it.status,
+                    createTime = it.createTime,
+                    updateTime = it.updateTime,
+                )
+            }
         }
 
         return builder.ok().data(rs).build()
@@ -527,8 +591,10 @@ class ObjectItemController(
     @PostMapping("/{id}/comments")
     fun createComment(
         @PathVariable id: Int,
-        @RequestBody request: ObjectItemCommentSaveRequest,
+        @Valid @RequestBody request: ObjectItemCommentSaveRequest,
+        servletRequest: HttpServletRequest,
     ): ResponseEntity<Response> {
+        limitAnonymousWrite(servletRequest, "comment", MAX_COMMENT_SUBMISSIONS_PER_HOUR)
         val comment = objectItemCommentService.create(id, request)
 
         data class Response(
@@ -557,9 +623,12 @@ class ObjectItemController(
     @PostMapping("/{id}/join-applications")
     fun createJoinApplication(
         @PathVariable id: Int,
-        @RequestBody request: JoinApplicationSaveRequest,
+        @Valid @RequestBody request: JoinApplicationSaveRequest,
+        servletRequest: HttpServletRequest,
     ): ResponseEntity<Response> {
-        val application = joinApplicationService.create(id, request)
+        limitAnonymousWrite(servletRequest, "join", MAX_JOIN_SUBMISSIONS_PER_HOUR)
+        val saved = joinApplicationService.createTracked(id, request)
+        val application = saved.value
 
         data class Response(
             val id: Int?,
@@ -573,6 +642,7 @@ class ObjectItemController(
             val rejectReason: String?,
             val createTime: LocalDateTime?,
             val updateTime: LocalDateTime?,
+            val trackingToken: String,
         )
 
         val rs = Response(
@@ -587,13 +657,46 @@ class ObjectItemController(
             rejectReason = application.rejectReason,
             createTime = application.createTime,
             updateTime = application.updateTime,
+            trackingToken = saved.trackingToken,
         )
 
         return builder.ok().data(rs).build()
     }
 
+    /** 游客凭提交成功时展示的一次性追踪码查询加入申请状态。 */
+    @GetMapping("/{id}/join-applications/{applicationId}/status")
+    fun getTrackedJoinApplicationStatus(
+        @PathVariable id: Int,
+        @PathVariable applicationId: Int,
+        @RequestHeader(SUBMISSION_TRACKING_TOKEN_HEADER) trackingToken: String,
+        servletRequest: HttpServletRequest,
+    ): ResponseEntity<Response> {
+        rateLimiter.consume(
+            "tracking-status-ip",
+            clientRequestIdentity.clientIp(servletRequest),
+            MAX_TRACKING_READS_PER_HOUR,
+            RATE_LIMIT_WINDOW,
+        )
+        val application = joinApplicationService.findTracked(id, applicationId, trackingToken)
+        return builder.ok().data(application).build()
+    }
+
+    private fun limitAnonymousWrite(request: HttpServletRequest, type: String, limit: Int) {
+        val clientIp = clientRequestIdentity.clientIp(request)
+        rateLimiter.consume("public-write-ip", clientIp, MAX_PUBLIC_WRITES_PER_HOUR, RATE_LIMIT_WINDOW)
+        rateLimiter.consume("public-$type-ip", clientIp, limit, RATE_LIMIT_WINDOW)
+    }
+
     private companion object {
         const val DEFAULT_PAGE_SIZE = 20
+        const val DEFAULT_SUBRESOURCE_PAGE = 0
+        const val DEFAULT_SUBRESOURCE_PAGE_SIZE = 100
         const val DEFAULT_SORT = "id,desc"
+        const val MAX_PUBLIC_WRITES_PER_HOUR = 80
+        const val MAX_PROJECT_SUBMISSIONS_PER_HOUR = 10
+        const val MAX_COMMENT_SUBMISSIONS_PER_HOUR = 40
+        const val MAX_JOIN_SUBMISSIONS_PER_HOUR = 15
+        const val MAX_TRACKING_READS_PER_HOUR = 120
+        val RATE_LIMIT_WINDOW: Duration = Duration.ofHours(1)
     }
 }

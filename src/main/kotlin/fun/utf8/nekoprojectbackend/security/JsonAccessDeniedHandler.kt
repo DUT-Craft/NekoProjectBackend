@@ -26,7 +26,7 @@ class JsonAccessDeniedHandler(
         resp.contentType = MediaType.APPLICATION_JSON_VALUE
         resp.characterEncoding = Charsets.UTF_8.name()
         resp.writer.write(
-            objectMapper.writeValueAsString(Response(status, ex.message ?: "禁止访问", emptyMap<String, Any?>()))
+            objectMapper.writeValueAsString(Response(status, "禁止访问", emptyMap<String, Any?>()))
         )
     }
 }

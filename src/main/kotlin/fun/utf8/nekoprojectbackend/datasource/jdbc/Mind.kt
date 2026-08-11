@@ -36,6 +36,9 @@ class Mind {
     @Column(name = "mc_id", length = 64)
     var mcId: String? = null
 
+    @Column(name = "tracking_token_hash", length = 64)
+    var trackingTokenHash: String? = null
+
     @Column(name = "create_time", nullable = false)
     var createTime: LocalDateTime? = null
 

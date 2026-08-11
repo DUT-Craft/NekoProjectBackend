@@ -8,6 +8,8 @@ import org.springframework.boot.context.event.ApplicationReadyEvent
 import org.springframework.context.event.EventListener
 import org.springframework.core.Ordered
 import org.springframework.core.annotation.Order
+import org.springframework.core.env.Environment
+import org.springframework.core.env.Profiles
 import org.springframework.stereotype.Component
 
 /**
@@ -21,8 +23,10 @@ import org.springframework.stereotype.Component
 @Component
 class AdminUserSeeder(
     private val userService: UserService,
+    private val environment: Environment,
+    @Value("\${neko.admin.seed-enabled:true}") private val enabled: Boolean,
     @Value("\${neko.admin.username:admin}") private val username: String,
-    @Value("\${neko.admin.password:password}") private val password: String,
+    @Value("\${neko.admin.password:NekoLocalRoot!2026}") private val password: String,
     @Value("\${neko.admin.email:admin@nekobox.local}") private val email: String,
 ) {
     private val log = LoggerFactory.getLogger(javaClass)
@@ -30,15 +34,27 @@ class AdminUserSeeder(
     @Order(Ordered.HIGHEST_PRECEDENCE)
     @EventListener(ApplicationReadyEvent::class)
     fun seedAdmin() {
+        if (!enabled) {
+            log.info("⚠ 跳过初始管理员创建（neko.admin.seed-enabled=false）")
+            return
+        }
+        if (environment.acceptsProfiles(Profiles.of("prod")) &&
+            (password == DEFAULT_PASSWORD || password.length < MIN_PRODUCTION_PASSWORD_LENGTH)
+        ) {
+            throw IllegalStateException(
+                "生产环境启用初始管理员创建时，ADMIN_PASSWORD 必须至少 $MIN_PRODUCTION_PASSWORD_LENGTH 位且不能使用默认值",
+            )
+        }
         if (userService.findByUsername(username) != null) {
             log.info("⚠ 管理员用户 [$username] 已存在，跳过初始化")
             return
         }
-        try {
-            userService.createUser(username = username, password = password, email = email, role = Role.SUPER_ADMIN)
-            log.info("✓ 默认管理员用户 [$username] 初始化完成")
-        } catch (e: Exception) {
-            log.error("✗ 默认管理员用户 [$username] 初始化失败: ${e.message}", e)
-        }
+        userService.createUser(username = username, password = password, email = email, role = Role.SUPER_ADMIN)
+        log.info("✓ 默认管理员用户 [$username] 初始化完成")
+    }
+
+    private companion object {
+        const val DEFAULT_PASSWORD = "NekoLocalRoot!2026"
+        const val MIN_PRODUCTION_PASSWORD_LENGTH = 12
     }
 }

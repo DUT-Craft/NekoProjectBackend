@@ -5,45 +5,71 @@ import `fun`.utf8.nekoprojectbackend.datasource.jdbc.MindRepository
 import `fun`.utf8.nekoprojectbackend.datasource.jdbc.MindStatus
 import `fun`.utf8.nekoprojectbackend.handlder.ParamErrorException
 import `fun`.utf8.nekoprojectbackend.handlder.ResourceNotFoundException
+import jakarta.validation.Valid
+import jakarta.validation.constraints.NotBlank
+import jakarta.validation.constraints.Size
+import org.springframework.data.domain.PageRequest
+import org.springframework.data.domain.Sort
+import org.springframework.data.jpa.domain.Specification
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
 import java.time.LocalDateTime
 
 data class MindSaveRequest(
+    @field:NotBlank(message = "想法标题不能为空")
+    @field:Size(max = 128, message = "想法标题不能超过 128 个字符")
     val title: String = "",
+    @field:Size(max = 64, message = "想法昵称不能超过 64 个字符")
     val nickName: String? = null,
     val status: MindStatus? = MindStatus.PENDING,
+    @field:NotBlank(message = "想法内容不能为空")
+    @field:Size(max = 10000, message = "想法内容不能超过 10000 个字符")
     val content: String? = null,
+    @field:Size(max = 64, message = "想法 Minecraft ID 不能超过 64 个字符")
     val mcId: String? = null,
 )
 
 data class MindBatchSaveRequest(
+    @field:Size(min = 1, max = 100, message = "批量操作数量必须为 1 到 100 条")
+    @field:Valid
     val items: List<MindSaveRequest> = emptyList(),
 )
 
 data class MindUpdateRequest(
     val id: Int? = null,
+    @field:Size(max = 128, message = "想法标题不能超过 128 个字符")
     val title: String? = null,
+    @field:Size(max = 64, message = "想法昵称不能超过 64 个字符")
     val nickName: String? = null,
     val status: MindStatus? = null,
+    @field:Size(max = 10000, message = "想法内容不能超过 10000 个字符")
     val content: String? = null,
+    @field:Size(max = 64, message = "想法 Minecraft ID 不能超过 64 个字符")
     val mcId: String? = null,
 )
 
 data class MindBatchUpdateRequest(
+    @field:Size(min = 1, max = 100, message = "批量操作数量必须为 1 到 100 条")
+    @field:Valid
     val items: List<MindUpdateRequest> = emptyList(),
 )
 
 data class MindBatchDeleteRequest(
+    @field:Size(min = 1, max = 100, message = "批量操作数量必须为 1 到 100 条")
     val ids: List<Int> = emptyList(),
 )
 
 data class MindQueryRequest(
+    @field:Size(max = 100, message = "想法 ID 查询不能超过 100 个")
     val ids: List<Int>? = null,
+    @field:Size(max = 128, message = "想法标题查询不能超过 128 个字符")
     val title: String? = null,
+    @field:Size(max = 64, message = "想法昵称查询不能超过 64 个字符")
     val nickName: String? = null,
     val status: MindStatus? = null,
+    @field:Size(max = 4, message = "想法状态查询不能超过 4 个")
     val statuses: List<MindStatus>? = null,
+    @field:Size(max = 64, message = "Minecraft ID 查询不能超过 64 个字符")
     val mcId: String? = null,
 )
 
@@ -84,11 +110,22 @@ enum class MindSortProperty(val alias: String) {
 @Service
 class MindService(
     private val mindRepository: MindRepository,
+    private val submissionTrackingService: SubmissionTrackingService,
 ) {
 
     @Transactional
     fun save(request: MindSaveRequest): MindResponse =
         mindRepository.save(request.toEntity()).toResponse()
+
+    @Transactional
+    fun saveTracked(request: MindSaveRequest): TrackedSubmission<MindResponse> {
+        val issued = submissionTrackingService.issue()
+        val entity = request.toEntity().also { it.trackingTokenHash = issued.hash }
+        return TrackedSubmission(
+            value = mindRepository.save(entity).toResponse(),
+            trackingToken = issued.token,
+        )
+    }
 
     @Transactional
     fun saveBatch(requests: List<MindSaveRequest>): List<MindResponse> {
@@ -101,9 +138,38 @@ class MindService(
     fun findById(id: Int): MindResponse = findMind(id).toResponse()
 
     @Transactional(readOnly = true)
+    fun findPublicById(id: Int): MindResponse {
+        val mind = findMind(id)
+        if (mind.status != MindStatus.APPROVED) {
+            throw ResourceNotFoundException("想法不存在")
+        }
+        return mind.toResponse()
+    }
+
+    @Transactional(readOnly = true)
+    fun findTracked(id: Int, trackingToken: String): MindResponse {
+        val mind = findMind(id)
+        if (!submissionTrackingService.matches(trackingToken, mind.trackingTokenHash)) {
+            throw ResourceNotFoundException("想法不存在或追踪码不正确")
+        }
+        return mind.toResponse()
+    }
+
+    @Transactional(readOnly = true)
     fun query(request: MindQueryRequest): List<MindResponse> =
-        filterMinds(request).sortedWith(mindComparator(DEFAULT_SORT))
-            .map { it.toResponse() }
+        mindRepository.findAll(
+            specification(request),
+            PageRequest.of(0, MAX_UNPAGED_RESULTS, toSpringSort(DEFAULT_SORT)),
+        ).let { result ->
+            if (result.totalElements > MAX_UNPAGED_RESULTS) {
+                throw ParamErrorException("匹配想法超过 $MAX_UNPAGED_RESULTS 条，请使用分页查询")
+            }
+            result.content.map { it.toResponse() }
+        }
+
+    @Transactional(readOnly = true)
+    fun queryPublic(request: MindQueryRequest): List<MindResponse> =
+        query(request.copy(status = MindStatus.APPROVED, statuses = null))
 
     @Transactional(readOnly = true)
     fun queryPage(request: MindQueryRequest, page: Int, size: Int, sort: String): MindPageVO {
@@ -111,34 +177,53 @@ class MindService(
         if (size <= 0) throw ParamErrorException("每页条数必须大于 0")
         if (size > MAX_PAGE_SIZE) throw ParamErrorException("每页条数不能超过 $MAX_PAGE_SIZE 条")
 
-        val sorted = filterMinds(request).sortedWith(mindComparator(sort))
-        val total = sorted.size.toLong()
-        val totalPages = if (total == 0L) 0 else ((total + size - 1) / size).toInt()
-        val fromIndex = minOf(page * size, sorted.size)
-        val toIndex = minOf(fromIndex + size, sorted.size)
-        val pageContent = sorted.subList(fromIndex, toIndex).map { it.toResponse() }
+        val specification = specification(request)
+        if (page.toLong() * size > Int.MAX_VALUE) {
+            val totalElements = mindRepository.count(specification)
+            return MindPageVO(
+                content = emptyList(),
+                totalElements = totalElements,
+                totalPages = totalPages(totalElements, size),
+                page = page,
+                size = size,
+            )
+        }
+        val result = mindRepository.findAll(
+            specification,
+            PageRequest.of(page, size, toSpringSort(sort)),
+        )
 
         return MindPageVO(
-            content = pageContent,
-            totalElements = total,
-            totalPages = totalPages,
+            content = result.content.map { it.toResponse() },
+            totalElements = result.totalElements,
+            totalPages = result.totalPages,
             page = page,
             size = size,
         )
     }
 
     @Transactional(readOnly = true)
+    fun queryPublicPage(request: MindQueryRequest, page: Int, size: Int, sort: String): MindPageVO =
+        queryPage(request.copy(status = MindStatus.APPROVED, statuses = null), page, size, sort)
+
+    @Transactional(readOnly = true)
     fun findByStatus(status: MindStatus): List<MindResponse> =
-        mindRepository.findByStatus(status)
-            .sortedWith(mindComparator(DEFAULT_SORT))
-            .map { it.toResponse() }
+        query(MindQueryRequest(status = status))
+
+    @Transactional(readOnly = true)
+    fun findPublicByStatus(status: MindStatus): List<MindResponse> =
+        if (status == MindStatus.APPROVED) findByStatus(status) else emptyList()
 
     @Transactional(readOnly = true)
     fun findByStatuses(statuses: List<MindStatus>): List<MindResponse> {
         if (statuses.isEmpty()) throw ParamErrorException("状态列表不能为空")
-        return mindRepository.findByStatusIn(statuses)
-            .sortedWith(mindComparator(DEFAULT_SORT))
-            .map { it.toResponse() }
+        return query(MindQueryRequest(statuses = statuses))
+    }
+
+    @Transactional(readOnly = true)
+    fun findPublicByStatuses(statuses: List<MindStatus>): List<MindResponse> {
+        if (statuses.isEmpty()) throw ParamErrorException("状态列表不能为空")
+        return if (MindStatus.APPROVED in statuses) findByStatus(MindStatus.APPROVED) else emptyList()
     }
 
     @Transactional(readOnly = true)
@@ -192,47 +277,76 @@ class MindService(
         updateBatch(ids.map { MindUpdateRequest(id = it, status = MindStatus.DELETED) })
     }
 
-    private fun filterMinds(request: MindQueryRequest): List<Mind> {
+    private fun specification(request: MindQueryRequest): Specification<Mind> {
         val ids = normalizeIds(request.ids)
-        val normalizedTitle = normalizeNullableText(request.title)
-        val normalizedNickName = normalizeNullableText(request.nickName)
-        val normalizedMcId = normalizeNullableText(request.mcId)
+        val normalizedTitle = normalizeNullableText(
+            request.title,
+            MAX_TITLE_LENGTH,
+            "想法标题查询不能超过 $MAX_TITLE_LENGTH 个字符",
+        )
+        val normalizedNickName = normalizeNullableText(
+            request.nickName,
+            MAX_NICK_NAME_LENGTH,
+            "想法昵称查询不能超过 $MAX_NICK_NAME_LENGTH 个字符",
+        )
+        val normalizedMcId = normalizeNullableText(
+            request.mcId,
+            MAX_MC_ID_LENGTH,
+            "Minecraft ID 查询不能超过 $MAX_MC_ID_LENGTH 个字符",
+        )
         val requestedStatuses = normalizeStatuses(request.status, request.statuses)
-        val filterByStatus = requestedStatuses.isNotEmpty()
-
-        val source = if (ids.isNullOrEmpty()) {
-            mindRepository.findAll()
-        } else {
-            mindRepository.findAllById(ids).toList()
-        }
-
-        return source.asSequence()
-            .filter { normalizedTitle == null || it.title?.contains(normalizedTitle, ignoreCase = true) == true }
-            .filter {
-                normalizedNickName == null || it.nickName?.contains(
-                    normalizedNickName,
-                    ignoreCase = true
-                ) == true
+        return Specification { root, _, criteriaBuilder ->
+            val predicates = mutableListOf<jakarta.persistence.criteria.Predicate>()
+            ids?.takeIf { it.isNotEmpty() }?.let {
+                predicates += root.get<Int>("id").`in`(it)
             }
-            .filter { !filterByStatus || it.status in requestedStatuses }
-            .filter { normalizedMcId == null || it.mcId?.equals(normalizedMcId, ignoreCase = true) == true }
-            .toList()
+            normalizedTitle?.let {
+                predicates += criteriaBuilder.like(
+                    criteriaBuilder.lower(root.get("title")),
+                    containsPattern(it),
+                    LIKE_ESCAPE,
+                )
+            }
+            normalizedNickName?.let {
+                predicates += criteriaBuilder.like(
+                    criteriaBuilder.lower(root.get("nickName")),
+                    containsPattern(it),
+                    LIKE_ESCAPE,
+                )
+            }
+            requestedStatuses.takeIf { it.isNotEmpty() }?.let {
+                predicates += root.get<MindStatus>("status").`in`(it)
+            }
+            normalizedMcId?.let {
+                predicates += criteriaBuilder.equal(
+                    criteriaBuilder.lower(root.get<String>("mcId")),
+                    it.lowercase(),
+                )
+            }
+            criteriaBuilder.and(*predicates.toTypedArray())
+        }
     }
 
-    private fun mindComparator(sort: String): Comparator<Mind> {
+    private fun toSpringSort(sort: String): Sort {
         val (property, direction) = parseSort(sort)
-        val base: Comparator<Mind> = when (property) {
-            MindSortProperty.ID -> compareBy { it.id ?: Int.MAX_VALUE }
-            MindSortProperty.CREATE_TIME -> compareBy { it.createTime ?: LocalDateTime.MIN }
-            MindSortProperty.UPDATE_TIME -> compareBy { it.updateTime ?: LocalDateTime.MIN }
-        }
-        return if (direction == SortDirection.DESC) base.reversed() else base
+        val springDirection = if (direction == SortDirection.DESC) Sort.Direction.DESC else Sort.Direction.ASC
+        return Sort.by(springDirection, property.alias)
     }
+
+    private fun totalPages(totalElements: Long, size: Int): Int =
+        if (totalElements == 0L) {
+            0
+        } else {
+            (((totalElements - 1) / size) + 1).coerceAtMost(Int.MAX_VALUE.toLong()).toInt()
+        }
 
     private fun parseSort(sort: String): Pair<MindSortProperty, SortDirection> {
         val parts = sort.split(",").map { it.trim() }.filter { it.isNotEmpty() }
         if (parts.isEmpty()) {
             return MindSortProperty.CREATE_TIME to SortDirection.DESC
+        }
+        if (parts.size > 2) {
+            throw ParamErrorException("排序参数格式错误，应为 字段,方向")
         }
         val property = MindSortProperty.from(parts[0])
             ?: throw ParamErrorException("不支持的排序字段：${parts[0]}，支持 id / createTime / updateTime")
@@ -250,7 +364,12 @@ class MindService(
         it.nickName =
             normalizeNullableText(nickName, MAX_NICK_NAME_LENGTH, "想法昵称不能超过 $MAX_NICK_NAME_LENGTH 个字符")
         it.status = MindStatus.PENDING
-        it.content = requireText(content ?: "", "想法内容不能为空")
+        it.content = requireText(
+            content ?: "",
+            "想法内容不能为空",
+            MAX_CONTENT_LENGTH,
+            "想法内容不能超过 $MAX_CONTENT_LENGTH 个字符",
+        )
         it.mcId = normalizeNullableText(mcId, MAX_MC_ID_LENGTH, "想法 Minecraft ID 不能超过 $MAX_MC_ID_LENGTH 个字符")
     }
 
@@ -262,7 +381,14 @@ class MindService(
             nickName = normalizeNullableText(it, MAX_NICK_NAME_LENGTH, "想法昵称不能超过 $MAX_NICK_NAME_LENGTH 个字符")
         }
         request.status?.let { status = it }
-        request.content?.let { content = requireText(it, "想法内容不能为空") }
+        request.content?.let {
+            content = requireText(
+                it,
+                "想法内容不能为空",
+                MAX_CONTENT_LENGTH,
+                "想法内容不能超过 $MAX_CONTENT_LENGTH 个字符",
+            )
+        }
         request.mcId?.let {
             mcId = normalizeNullableText(it, MAX_MC_ID_LENGTH, "想法 Minecraft ID 不能超过 $MAX_MC_ID_LENGTH 个字符")
         }
@@ -279,13 +405,20 @@ class MindService(
 
     private fun normalizeIds(ids: List<Int>?): List<Int>? {
         if (ids == null) return null
+        if (ids.size > MAX_QUERY_ID_COUNT) {
+            throw ParamErrorException("想法 ID 查询不能超过 $MAX_QUERY_ID_COUNT 个")
+        }
         return ids.map { requirePositiveId(it) }
             .distinct()
             .takeIf { it.isNotEmpty() }
     }
 
-    private fun normalizeStatuses(status: MindStatus?, statuses: List<MindStatus>?): Set<MindStatus> =
-        (listOfNotNull(status) + statuses.orEmpty()).toSet()
+    private fun normalizeStatuses(status: MindStatus?, statuses: List<MindStatus>?): Set<MindStatus> {
+        if (statuses != null && statuses.size > MindStatus.entries.size) {
+            throw ParamErrorException("想法状态查询不能超过 ${MindStatus.entries.size} 个")
+        }
+        return (listOfNotNull(status) + statuses.orEmpty()).toSet()
+    }
 
     private fun <T> validateBatchSize(items: List<T>, emptyMessage: String) {
         if (items.isEmpty()) throw ParamErrorException(emptyMessage)
@@ -312,6 +445,14 @@ class MindService(
         return normalized
     }
 
+    private fun containsPattern(value: String): String {
+        val escaped = value.lowercase()
+            .replace("\\", "\\\\")
+            .replace("%", "\\%")
+            .replace("_", "\\_")
+        return "%$escaped%"
+    }
+
     private fun Mind.toResponse(): MindResponse = MindResponse(
         id = id,
         title = title,
@@ -327,8 +468,12 @@ class MindService(
         private const val DEFAULT_SORT = "createTime,desc"
         private const val MAX_BATCH_SIZE = 100
         private const val MAX_TITLE_LENGTH = 128
+        private const val MAX_CONTENT_LENGTH = 10_000
         private const val MAX_NICK_NAME_LENGTH = 64
         private const val MAX_MC_ID_LENGTH = 64
-        private const val MAX_PAGE_SIZE = 1024
+        private const val MAX_QUERY_ID_COUNT = 100
+        private const val MAX_UNPAGED_RESULTS = 500
+        private const val MAX_PAGE_SIZE = 500
+        private const val LIKE_ESCAPE = '\\'
     }
 }

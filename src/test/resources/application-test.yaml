@@ -1,0 +1,26 @@
+spring:
+  datasource:
+    url: jdbc:h2:mem:neko_test;MODE=PostgreSQL;DB_CLOSE_DELAY=-1;DATABASE_TO_LOWER=TRUE
+    username: sa
+    password: ""
+    driver-class-name: org.h2.Driver
+  jpa:
+    hibernate:
+      ddl-auto: create-drop
+    database-platform: org.hibernate.dialect.H2Dialect
+  data:
+    redis:
+      host: localhost
+      port: 6379
+
+neko:
+  security:
+    rate-limit:
+      enabled: false
+  admin:
+    seed-enabled: false
+  seed:
+    enabled: false
+
+redis:
+  clear-on-startup: false

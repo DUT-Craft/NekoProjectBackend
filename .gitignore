@@ -40,5 +40,6 @@ out/
 .kotlin
 /.env
 /logs/
+/storage/
 /docs/
 /.ai/

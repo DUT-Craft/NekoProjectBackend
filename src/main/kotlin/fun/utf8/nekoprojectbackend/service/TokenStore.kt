@@ -20,7 +20,9 @@ class TokenStore(
 
     fun saveAccess(jti: String, userId: Long, ttl: Duration) {
         redis.opsForValue().set(accessKey(jti), userId.toString(), ttl)
-        redis.opsForSet().add(sessionIndexKey(userId), jti)
+        val indexKey = sessionIndexKey(userId)
+        redis.opsForSet().add(indexKey, jti)
+        extendIndexTtl(indexKey, ttl)
     }
 
     fun isAccessValid(jti: String): Boolean = redis.hasKey(accessKey(jti))
@@ -47,7 +49,9 @@ class TokenStore(
     fun saveRefresh(jti: String, userId: Long, ttl: Duration) {
         redis.opsForValue().set(refreshKey(jti), userId.toString(), ttl)
         // 建立用户→refresh 索引，供改密码 / 找回密码时批量吊销该用户全部刷新令牌
-        redis.opsForSet().add(refreshIndexKey(userId), jti)
+        val indexKey = refreshIndexKey(userId)
+        redis.opsForSet().add(indexKey, jti)
+        extendIndexTtl(indexKey, ttl)
     }
 
     /** 一次性消费刷新令牌：原子地取出并删除；不存在返回 null。顺带从用户索引移除，防集合膨胀。 */
@@ -62,6 +66,15 @@ class TokenStore(
     fun revokeRefresh(jti: String, userId: Long) {
         redis.delete(refreshKey(jti))
         redis.opsForSet().remove(refreshIndexKey(userId), jti)
+    }
+
+    /** 索引至少存活到其中最长令牌过期，避免无 TTL 集合在 Redis 中永久累积。 */
+    private fun extendIndexTtl(key: String, ttl: Duration) {
+        val requestedSeconds = ttl.seconds.coerceAtLeast(1L)
+        val remainingSeconds = redis.getExpire(key)
+        if (remainingSeconds < requestedSeconds) {
+            redis.expire(key, Duration.ofSeconds(requestedSeconds))
+        }
     }
 
     private fun accessKey(jti: String) = "auth:token:$jti"

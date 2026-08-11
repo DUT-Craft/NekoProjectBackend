@@ -3,23 +3,40 @@ package `fun`.utf8.nekoprojectbackend.service
 import `fun`.utf8.nekoprojectbackend.datasource.jdbc.ObjectItemUpdate
 import `fun`.utf8.nekoprojectbackend.datasource.jdbc.ObjectItemUpdateRepository
 import `fun`.utf8.nekoprojectbackend.datasource.jdbc.ObjectItemUpdateStatus
+import `fun`.utf8.nekoprojectbackend.handlder.ForbiddenException
 import `fun`.utf8.nekoprojectbackend.handlder.ParamErrorException
 import `fun`.utf8.nekoprojectbackend.handlder.ResourceNotFoundException
+import jakarta.validation.constraints.NotBlank
+import jakarta.validation.constraints.Size
+import org.springframework.data.domain.Page
+import org.springframework.data.domain.Pageable
+import org.springframework.data.domain.PageRequest
+import org.springframework.data.domain.Sort
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
 
 data class ObjectItemUpdateManageCreateRequest(
+    @field:Size(max = 72, message = "项目控制密码不能超过 72 个字符")
     val controlPassword: String = "",
+    @field:NotBlank(message = "动态标题不能为空")
+    @field:Size(max = 128, message = "动态标题不能超过 128 个字符")
     val title: String = "",
+    @field:NotBlank(message = "动态内容不能为空")
+    @field:Size(max = 10_000, message = "动态内容不能超过 10000 个字符")
     val content: String = "",
+    @field:Size(max = 512, message = "动态图片 URL 不能超过 512 个字符")
     val imageUrl: String? = null,
     val status: ObjectItemUpdateStatus? = ObjectItemUpdateStatus.PENDING,
 )
 
 data class ObjectItemUpdateManageUpdateRequest(
+    @field:Size(max = 72, message = "项目控制密码不能超过 72 个字符")
     val controlPassword: String = "",
+    @field:Size(max = 128, message = "动态标题不能超过 128 个字符")
     val title: String? = null,
+    @field:Size(max = 10_000, message = "动态内容不能超过 10000 个字符")
     val content: String? = null,
+    @field:Size(max = 512, message = "动态图片 URL 不能超过 512 个字符")
     val imageUrl: String? = null,
     val status: ObjectItemUpdateStatus? = null,
 )
@@ -47,15 +64,81 @@ class ObjectItemUpdateManagementService(
         objectItemId: Int,
         status: ObjectItemUpdateStatus?,
     ): List<ObjectItemUpdateResponse> {
-        val updates = if (status != null) {
-            objectItemUpdateRepository.findByObjectItemIdAndStatus(objectItemId, status)
-        } else {
-            objectItemUpdateRepository.findByObjectItemId(objectItemId)
+        val page = listByAdminPage(objectItemId, status, 0, MAX_UNPAGED_RESULTS)
+        if (page.totalElements > MAX_UNPAGED_RESULTS) {
+            throw ParamErrorException("项目动态超过 $MAX_UNPAGED_RESULTS 条，请使用分页查询")
         }
-        return updates.asSequence()
-            .sortedBy { it.id ?: Int.MAX_VALUE }
-            .map { it.toResponse() }
-            .toList()
+        return page.content
+    }
+
+    @Transactional(readOnly = true)
+    fun listByAdminPage(
+        objectItemId: Int,
+        status: ObjectItemUpdateStatus?,
+        page: Int,
+        size: Int,
+    ): ObjectItemUpdatePageVO {
+        requirePositiveItemId(objectItemId)
+        return queryPage(
+            page = page,
+            size = size,
+            query = { pageable ->
+                if (status != null) {
+                    objectItemUpdateRepository.findByObjectItemIdAndStatus(objectItemId, status, pageable)
+                } else {
+                    objectItemUpdateRepository.findByObjectItemId(objectItemId, pageable)
+                }
+            },
+            count = {
+                if (status != null) {
+                    objectItemUpdateRepository.countByObjectItemIdAndStatus(objectItemId, status)
+                } else {
+                    objectItemUpdateRepository.countByObjectItemId(objectItemId)
+                }
+            },
+        )
+    }
+
+    private fun queryPage(
+        page: Int,
+        size: Int,
+        query: (Pageable) -> Page<ObjectItemUpdate>,
+        count: () -> Long,
+    ): ObjectItemUpdatePageVO {
+        validatePageRequest(page, size)
+        if (page.toLong() * size > Int.MAX_VALUE) {
+            val totalElements = count()
+            return ObjectItemUpdatePageVO(
+                content = emptyList(),
+                totalElements = totalElements,
+                totalPages = totalPages(totalElements, size),
+                page = page,
+                size = size,
+            )
+        }
+
+        val result = query(PageRequest.of(page, size, Sort.by(Sort.Direction.ASC, "id")))
+        return ObjectItemUpdatePageVO(
+            content = result.content.map { it.toResponse() },
+            totalElements = result.totalElements,
+            totalPages = result.totalPages,
+            page = page,
+            size = size,
+        )
+    }
+
+    private fun validatePageRequest(page: Int, size: Int) {
+        if (page < 0) throw ParamErrorException("页码不能小于 0")
+        if (size <= 0) throw ParamErrorException("每页条数必须大于 0")
+        if (size > MAX_PAGE_SIZE) throw ParamErrorException("每页条数不能超过 $MAX_PAGE_SIZE 条")
+    }
+
+    private fun totalPages(totalElements: Long, size: Int): Int =
+        if (totalElements == 0L) 0 else (((totalElements - 1) / size) + 1)
+            .coerceAtMost(Int.MAX_VALUE.toLong()).toInt()
+
+    private fun requirePositiveItemId(objectItemId: Int) {
+        if (objectItemId <= 0) throw ParamErrorException("项目条目 ID 必须大于 0")
     }
 
     @Transactional
@@ -64,7 +147,7 @@ class ObjectItemUpdateManagementService(
         request: ObjectItemUpdateManageCreateRequest,
     ): ObjectItemUpdateResponse {
         verifyProject(objectItemId, request.toVerifyRequest())
-        return createByAdmin(objectItemId, request)
+        return createByAdmin(objectItemId, request.copy(status = ObjectItemUpdateStatus.APPROVED))
     }
 
     /** 管理员发布项目动态：JWT 鉴权，无需项目控制密码。 */
@@ -81,13 +164,18 @@ class ObjectItemUpdateManagementService(
                 MAX_TITLE_LENGTH,
                 "动态标题不能超过 $MAX_TITLE_LENGTH 个字符",
             )
-            it.content = requireText(request.content, "动态内容不能为空")
-            it.imageUrl = normalizeNullableText(
+            it.content = requireText(
+                request.content,
+                "动态内容不能为空",
+                MAX_CONTENT_LENGTH,
+                "动态内容不能超过 $MAX_CONTENT_LENGTH 个字符",
+            )
+            it.imageUrl = ImageUrlPolicy.normalize(
                 request.imageUrl,
                 MAX_IMAGE_URL_LENGTH,
-                "动态图片 URL 不能超过 $MAX_IMAGE_URL_LENGTH 个字符",
+                "动态图片 URL",
             )
-            it.status = request.status ?: ObjectItemUpdateStatus.PENDING
+            it.status = ObjectItemUpdateStatus.APPROVED
         }
         return objectItemUpdateRepository.save(entity).toResponse()
     }
@@ -99,6 +187,9 @@ class ObjectItemUpdateManagementService(
         request: ObjectItemUpdateManageUpdateRequest,
     ): ObjectItemUpdateResponse {
         verifyProject(objectItemId, request.toVerifyRequest())
+        if (request.status != null) {
+            throw ForbiddenException("项目方不能修改动态审核状态")
+        }
         return updateByAdmin(objectItemId, updateId, request)
     }
 
@@ -109,6 +200,9 @@ class ObjectItemUpdateManagementService(
         updateId: Int,
         request: ObjectItemUpdateManageUpdateRequest,
     ): ObjectItemUpdateResponse {
+        if (request.status != null) {
+            throw ParamErrorException("动态审核状态请使用专用审核接口修改")
+        }
         val update = loadUpdate(updateId, objectItemId)
         applyUpdateFields(update, request)
         return objectItemUpdateRepository.save(update).toResponse()
@@ -120,6 +214,7 @@ class ObjectItemUpdateManagementService(
         updateId: Int,
         status: ObjectItemUpdateStatus,
     ): ObjectItemUpdateResponse {
+        ensureModerationStatus(status)
         val update = loadUpdate(updateId, objectItemId)
         update.status = status
         return objectItemUpdateRepository.save(update).toResponse()
@@ -156,19 +251,31 @@ class ObjectItemUpdateManagementService(
                 "动态标题不能超过 $MAX_TITLE_LENGTH 个字符",
             )
         }
-        request.content?.let { update.content = requireText(it, "动态内容不能为空") }
-        request.imageUrl?.let {
-            update.imageUrl = normalizeNullableText(
+        request.content?.let {
+            update.content = requireText(
                 it,
-                MAX_IMAGE_URL_LENGTH,
-                "动态图片 URL 不能超过 $MAX_IMAGE_URL_LENGTH 个字符",
+                "动态内容不能为空",
+                MAX_CONTENT_LENGTH,
+                "动态内容不能超过 $MAX_CONTENT_LENGTH 个字符",
             )
         }
-        request.status?.let { update.status = it }
+        request.imageUrl?.let {
+            update.imageUrl = ImageUrlPolicy.normalize(
+                it,
+                MAX_IMAGE_URL_LENGTH,
+                "动态图片 URL",
+            )
+        }
     }
 
     private fun verifyProject(objectItemId: Int, request: ObjectItemManageVerifyRequest) {
         objectItemManagementService.verify(objectItemId, request)
+    }
+
+    private fun ensureModerationStatus(status: ObjectItemUpdateStatus) {
+        if (status !in MODERATION_STATUSES) {
+            throw ParamErrorException("动态审核状态只能是 APPROVED、REJECTED 或 DELETED")
+        }
     }
 
     private fun loadUpdate(updateId: Int, objectItemId: Int): ObjectItemUpdate {
@@ -210,18 +317,6 @@ class ObjectItemUpdateManagementService(
         return normalized
     }
 
-    private fun normalizeNullableText(value: String?): String? {
-        return value?.trim()?.ifBlank { null }
-    }
-
-    private fun normalizeNullableText(value: String?, maxLength: Int, tooLongMessage: String): String? {
-        val normalized = normalizeNullableText(value)
-        if (normalized != null && normalized.length > maxLength) {
-            throw ParamErrorException(tooLongMessage)
-        }
-        return normalized
-    }
-
     private fun ObjectItemUpdate.toResponse(): ObjectItemUpdateResponse {
         return ObjectItemUpdateResponse(
             id = id,
@@ -237,6 +332,14 @@ class ObjectItemUpdateManagementService(
 
     private companion object {
         private const val MAX_TITLE_LENGTH = 128
+        private const val MAX_CONTENT_LENGTH = 10_000
         private const val MAX_IMAGE_URL_LENGTH = 512
+        private const val MAX_UNPAGED_RESULTS = 500
+        private const val MAX_PAGE_SIZE = 500
+        private val MODERATION_STATUSES = setOf(
+            ObjectItemUpdateStatus.APPROVED,
+            ObjectItemUpdateStatus.REJECTED,
+            ObjectItemUpdateStatus.DELETED,
+        )
     }
 }

@@ -9,6 +9,7 @@ import org.springframework.boot.context.properties.ConfigurationProperties
  * - [codeLength] 验证码位数（默认 6 位纯数字）
  * - [sendIntervalSeconds] 同一邮箱两次发送的最小间隔（防轰炸，默认 60s）
  * - [dailyLimit] 同一邮箱每日发送上限（默认 10 次）
+ * - [maxAttempts] 单个验证码允许的错误尝试次数（默认 5 次）
  * - [from] 发件人地址，默认回退到 spring.mail.username
  * - [subjectPrefix] 邮件主题前缀
  */
@@ -18,6 +19,7 @@ data class MailProperties(
     val codeLength: Int = 6,
     val sendIntervalSeconds: Long = 60L,
     val dailyLimit: Long = 10L,
+    val maxAttempts: Long = 5L,
     val from: String = "",
     val subjectPrefix: String = "NekoBackend",
 )

@@ -3,6 +3,9 @@ package `fun`.utf8.nekoprojectbackend.config
 import `fun`.utf8.nekoprojectbackend.security.JsonAccessDeniedHandler
 import `fun`.utf8.nekoprojectbackend.security.JsonAuthEntryPoint
 import `fun`.utf8.nekoprojectbackend.security.JwtAuthenticationFilter
+import `fun`.utf8.nekoprojectbackend.security.ProjectControlRequestRateLimitFilter
+import `fun`.utf8.nekoprojectbackend.security.RefreshRequestOriginFilter
+import org.springframework.beans.factory.annotation.Value
 import org.springframework.boot.context.properties.EnableConfigurationProperties
 import org.springframework.context.annotation.Bean
 import org.springframework.context.annotation.Configuration
@@ -12,6 +15,8 @@ import org.springframework.security.config.annotation.web.builders.HttpSecurity
 import org.springframework.security.config.http.SessionCreationPolicy
 import org.springframework.security.web.SecurityFilterChain
 import org.springframework.security.web.authentication.UsernamePasswordAuthenticationFilter
+import org.springframework.security.web.authentication.logout.LogoutFilter
+import org.springframework.web.filter.CorsFilter
 import org.springframework.web.cors.CorsConfiguration
 import org.springframework.web.cors.CorsConfigurationSource
 import org.springframework.web.cors.UrlBasedCorsConfigurationSource
@@ -39,6 +44,9 @@ class SecurityConfig(
     private val jwtFilter: JwtAuthenticationFilter,
     private val authEntryPoint: JsonAuthEntryPoint,
     private val accessDeniedHandler: JsonAccessDeniedHandler,
+    private val refreshRequestOriginFilter: RefreshRequestOriginFilter,
+    private val projectControlRequestRateLimitFilter: ProjectControlRequestRateLimitFilter,
+    @Value("\${neko.cors.allowed-origins}") private val corsAllowedOrigins: String,
 ) {
 
     @Bean
@@ -84,19 +92,32 @@ class SecurityConfig(
                 it.authenticationEntryPoint(authEntryPoint)
                 it.accessDeniedHandler(accessDeniedHandler)
             }
+            .addFilterAfter(refreshRequestOriginFilter, CorsFilter::class.java)
+            .addFilterAfter(projectControlRequestRateLimitFilter, LogoutFilter::class.java)
             .addFilterBefore(jwtFilter, UsernamePasswordAuthenticationFilter::class.java)
         return http.build()
     }
 
     @Bean
     fun corsConfigurationSource(): CorsConfigurationSource {
+        val origins = corsAllowedOrigins.split(',')
+            .map { it.trim() }
+            .filter { it.isNotEmpty() }
+            .distinct()
+        require(origins.isNotEmpty()) { "neko.cors.allowed-origins 不能为空" }
+        require(origins.none { '*' in it }) { "CORS 允许来源不能包含通配符" }
+
         val config = CorsConfiguration().apply {
-            // origin 走回显：allowedOriginPatterns 支持带凭证，浏览器会收到具体 origin（而非字面 *）
-            allowedOriginPatterns = listOf("*")
-            // 方法 / 请求头必须显式列举：allowCredentials=true 时，浏览器不接受通配 *，
-            // 否则 preflight 会以 "field content-type is not allowed by Access-Control-Allow-Headers" 拦截
+            allowedOrigins = origins
             allowedMethods = listOf("GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS")
-            allowedHeaders = listOf("Authorization", "Content-Type", "Accept", "X-Requested-With")
+            allowedHeaders = listOf(
+                "Authorization",
+                "Content-Type",
+                "Accept",
+                "X-Requested-With",
+                "X-Project-Control-Password",
+                "X-Submission-Tracking-Token",
+            )
             allowCredentials = true
             maxAge = 3600
         }

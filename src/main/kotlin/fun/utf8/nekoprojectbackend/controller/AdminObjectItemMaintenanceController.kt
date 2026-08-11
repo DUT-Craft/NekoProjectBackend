@@ -3,13 +3,17 @@ package `fun`.utf8.nekoprojectbackend.controller
 import `fun`.utf8.nekoprojectbackend.datasource.jdbc.JoinApplicationStatus
 import `fun`.utf8.nekoprojectbackend.datasource.jdbc.ObjectItemCommentStatus
 import `fun`.utf8.nekoprojectbackend.datasource.jdbc.ObjectItemUpdateStatus
+import `fun`.utf8.nekoprojectbackend.datasource.jdbc.FileCategory
 import `fun`.utf8.nekoprojectbackend.security.LoginUser
 import `fun`.utf8.nekoprojectbackend.service.*
 import `fun`.utf8.nekoprojectbackend.shared.Response
 import `fun`.utf8.nekoprojectbackend.shared.ResponseBuilder
+import jakarta.validation.Valid
 import org.springframework.http.ResponseEntity
+import org.springframework.http.MediaType
 import org.springframework.security.core.annotation.AuthenticationPrincipal
 import org.springframework.web.bind.annotation.*
+import org.springframework.web.multipart.MultipartFile
 
 /**
  * 管理端「单个项目维护」接口（/api/admin/object-items/{id}/...）：JWT 鉴权，无需项目控制密码。
@@ -23,6 +27,7 @@ class AdminObjectItemMaintenanceController(
     private val joinApplicationManagementService: JoinApplicationManagementService,
     private val objectItemUpdateManagementService: ObjectItemUpdateManagementService,
     private val objectItemCommentManagementService: ObjectItemCommentManagementService,
+    private val fileService: FileService,
     private val accessService: AccessService,
     private val operationLogService: OperationLogService,
     private val builder: ResponseBuilder,
@@ -35,10 +40,33 @@ class AdminObjectItemMaintenanceController(
         @AuthenticationPrincipal admin: LoginUser,
         @PathVariable id: Int,
         @RequestParam(required = false) status: JoinApplicationStatus?,
+        @RequestParam(required = false) page: Int?,
+        @RequestParam(required = false) size: Int?,
     ): ResponseEntity<Response> {
         accessService.ensureCanManage(admin, id)
-        val applications = joinApplicationManagementService.listByAdmin(id, status)
+        val applications: Any = if (page != null || size != null) {
+            joinApplicationManagementService.listByAdminPage(
+                id,
+                status,
+                page ?: DEFAULT_SUBRESOURCE_PAGE,
+                size ?: DEFAULT_SUBRESOURCE_PAGE_SIZE,
+            )
+        } else {
+            joinApplicationManagementService.listByAdmin(id, status)
+        }
         return builder.ok().data(applications).build()
+    }
+
+    /** 管理员图片上传：文件记录绑定到项目，公开下载地址可直接用于封面或动态。 */
+    @PostMapping("/{id}/images", consumes = [MediaType.MULTIPART_FORM_DATA_VALUE])
+    fun uploadImage(
+        @AuthenticationPrincipal admin: LoginUser,
+        @PathVariable id: Int,
+        @RequestPart("file") file: MultipartFile,
+    ): ResponseEntity<Response> {
+        accessService.ensureCanManage(admin, id)
+        val result = fileService.upload(file, FileCategory.IMAGE, admin, id)
+        return builder.ok().data(result).build()
     }
 
     @PostMapping("/{id}/join-applications/{applicationId}/accept")
@@ -64,7 +92,7 @@ class AdminObjectItemMaintenanceController(
         @AuthenticationPrincipal admin: LoginUser,
         @PathVariable id: Int,
         @PathVariable applicationId: Int,
-        @RequestBody(required = false) request: JoinApplicationAdminRejectRequest?,
+        @Valid @RequestBody(required = false) request: JoinApplicationAdminRejectRequest?,
     ): ResponseEntity<Response> {
         accessService.ensureCanManage(admin, id)
         val application = joinApplicationManagementService.rejectByAdmin(
@@ -89,9 +117,20 @@ class AdminObjectItemMaintenanceController(
         @AuthenticationPrincipal admin: LoginUser,
         @PathVariable id: Int,
         @RequestParam(required = false) status: ObjectItemUpdateStatus?,
+        @RequestParam(required = false) page: Int?,
+        @RequestParam(required = false) size: Int?,
     ): ResponseEntity<Response> {
         accessService.ensureCanManage(admin, id)
-        val updates = objectItemUpdateManagementService.listByAdmin(id, status)
+        val updates: Any = if (page != null || size != null) {
+            objectItemUpdateManagementService.listByAdminPage(
+                id,
+                status,
+                page ?: DEFAULT_SUBRESOURCE_PAGE,
+                size ?: DEFAULT_SUBRESOURCE_PAGE_SIZE,
+            )
+        } else {
+            objectItemUpdateManagementService.listByAdmin(id, status)
+        }
         return builder.ok().data(updates).build()
     }
 
@@ -99,7 +138,7 @@ class AdminObjectItemMaintenanceController(
     fun createUpdate(
         @AuthenticationPrincipal admin: LoginUser,
         @PathVariable id: Int,
-        @RequestBody request: ObjectItemUpdateManageCreateRequest,
+        @Valid @RequestBody request: ObjectItemUpdateManageCreateRequest,
     ): ResponseEntity<Response> {
         accessService.ensureCanManage(admin, id)
         val update = objectItemUpdateManagementService.createByAdmin(id, request)
@@ -118,7 +157,7 @@ class AdminObjectItemMaintenanceController(
         @AuthenticationPrincipal admin: LoginUser,
         @PathVariable id: Int,
         @PathVariable updateId: Int,
-        @RequestBody request: ObjectItemUpdateManageUpdateRequest,
+        @Valid @RequestBody request: ObjectItemUpdateManageUpdateRequest,
     ): ResponseEntity<Response> {
         accessService.ensureCanManage(admin, id)
         val update = objectItemUpdateManagementService.updateByAdmin(id, updateId, request)
@@ -157,9 +196,25 @@ class AdminObjectItemMaintenanceController(
         @AuthenticationPrincipal admin: LoginUser,
         @PathVariable id: Int,
         @RequestParam(required = false) status: ObjectItemCommentStatus?,
+        @RequestParam(required = false) page: Int?,
+        @RequestParam(required = false) size: Int?,
     ): ResponseEntity<Response> {
         accessService.ensureCanManage(admin, id)
-        val comments = objectItemCommentManagementService.listByAdmin(id, status)
+        val comments: Any = if (page != null || size != null) {
+            objectItemCommentManagementService.listByAdminPage(
+                id,
+                status,
+                page ?: DEFAULT_SUBRESOURCE_PAGE,
+                size ?: DEFAULT_SUBRESOURCE_PAGE_SIZE,
+            )
+        } else {
+            objectItemCommentManagementService.listByAdmin(id, status)
+        }
         return builder.ok().data(comments).build()
+    }
+
+    private companion object {
+        private const val DEFAULT_SUBRESOURCE_PAGE = 0
+        private const val DEFAULT_SUBRESOURCE_PAGE_SIZE = 100
     }
 }

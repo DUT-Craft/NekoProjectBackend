@@ -63,6 +63,10 @@ class ObjectItem {
     @Column(name = "cover_image_url", length = 512)
     var coverImageUrl: String? = null
 
+    /** 项目完成进度，取值 0-100。 */
+    @Column(name = "progress", nullable = false)
+    var progress: Int = 0
+
     @Column(name = "control_password", length = 255)
     var controlPassword: String? = null
 

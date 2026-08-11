@@ -5,6 +5,7 @@ import `fun`.utf8.nekoprojectbackend.security.LoginUser
 import `fun`.utf8.nekoprojectbackend.service.*
 import `fun`.utf8.nekoprojectbackend.shared.Response
 import `fun`.utf8.nekoprojectbackend.shared.ResponseBuilder
+import jakarta.validation.Valid
 import org.springframework.http.ResponseEntity
 import org.springframework.security.core.annotation.AuthenticationPrincipal
 import org.springframework.web.bind.annotation.*
@@ -18,6 +19,15 @@ class AdminMindController(
     private val operationLogService: OperationLogService,
     private val builder: ResponseBuilder,
 ) {
+    @GetMapping("/{id}")
+    fun getById(
+        @AuthenticationPrincipal admin: LoginUser,
+        @PathVariable id: Int,
+    ): ResponseEntity<Response> {
+        accessService.requireSuperAdmin(admin)
+        return builder.ok().data(mindService.findById(id)).build()
+    }
+
     @GetMapping
     fun list(
         @AuthenticationPrincipal admin: LoginUser,
@@ -60,7 +70,7 @@ class AdminMindController(
     @PutMapping("/batch/status")
     fun batchStatus(
         @AuthenticationPrincipal admin: LoginUser,
-        @RequestBody request: AdminBatchStatusRequest<MindStatus>,
+        @Valid @RequestBody request: AdminBatchStatusRequest<MindStatus>,
     ): ResponseEntity<Response> {
         accessService.requireSuperAdmin(admin)
         val updateRequests = request.ids.map {
