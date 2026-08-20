@@ -192,7 +192,7 @@ class AdminContentService(
         return AdminPublicationView(id, false)
     }
 
-    fun auditLogs(): List<AdminAuditLogView> = auditLogRepository.findAllByOrderByCreatedAtDesc().map {
+    fun auditLogs(): List<AdminAuditLogView> = auditLogRepository.findTop200ByOrderByCreatedAtDesc().map {
         AdminAuditLogView(
             id = it.id.requirePresent("AuditLog.id"),
             operatorUserId = it.operatorUserId,

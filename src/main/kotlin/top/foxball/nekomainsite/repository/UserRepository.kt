@@ -10,4 +10,5 @@ interface UserRepository : JpaRepository<User, Long> {
     fun findByEmail(email: String): User?
     fun findByExternalUserId(externalUserId: String): User?
     fun countByRoleAndEnabledTrue(role: String): Long
+    fun findAllByOrderByCreatedAtDesc(): List<User>
 }

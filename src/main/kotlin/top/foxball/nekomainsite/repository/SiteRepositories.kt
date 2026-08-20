@@ -88,6 +88,7 @@ interface PrivateFeedbackRepository : JpaRepository<PrivateFeedback, Long> {
 
 interface AuditLogRepository : JpaRepository<top.foxball.nekomainsite.entity.jdbc.AuditLog, Long> {
     fun findAllByOrderByCreatedAtDesc(): List<top.foxball.nekomainsite.entity.jdbc.AuditLog>
+    fun findTop200ByOrderByCreatedAtDesc(): List<top.foxball.nekomainsite.entity.jdbc.AuditLog>
 }
 
 interface ContentDraftRepository : JpaRepository<ContentDraft, String> {

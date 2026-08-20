@@ -9,6 +9,7 @@ import org.springframework.http.HttpStatus
 import org.springframework.http.ResponseEntity
 import org.springframework.http.converter.HttpMessageNotReadableException
 import org.springframework.security.access.AccessDeniedException
+import org.springframework.web.HttpMediaTypeNotSupportedException
 import org.springframework.web.HttpRequestMethodNotSupportedException
 import org.springframework.web.bind.MethodArgumentNotValidException
 import org.springframework.web.bind.MissingRequestHeaderException
@@ -49,6 +50,13 @@ class GlobalExceptionHandler(
     fun onHttpRequestMethodNotSupportedException(ex: HttpRequestMethodNotSupportedException): ResponseEntity<Response> {
         return builder.status(HttpStatus.METHOD_NOT_ALLOWED)
             .message("Method \"${ex.method}\" is not supported on this endpoint.")
+            .build()
+    }
+
+    @ExceptionHandler(HttpMediaTypeNotSupportedException::class)
+    fun onHttpMediaTypeNotSupportedException(ex: HttpMediaTypeNotSupportedException): ResponseEntity<Response> {
+        return builder.status(HttpStatus.UNSUPPORTED_MEDIA_TYPE)
+            .message("请求的 Content-Type 不受支持，请使用 application/json")
             .build()
     }
 

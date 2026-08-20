@@ -32,6 +32,7 @@ data class UserAdminView(
 )
 
 interface UserService {
+    fun listUsers(): List<UserAdminView>
     fun createUser(command: CreateUserCommand): UserAdminView
     fun createUsers(commands: List<CreateUserCommand>): List<UserAdminView>
     fun getUserById(id: Long): UserAdminView?

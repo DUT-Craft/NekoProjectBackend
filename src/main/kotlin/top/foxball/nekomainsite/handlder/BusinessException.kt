@@ -41,3 +41,7 @@ class ResourceNotFoundException(
 class ParamErrorException(
     message: String = "参数错误"
 ) : BusinessException(HttpStatus.BAD_REQUEST, message)
+
+class TooManyRequestsException(
+    message: String = "操作过于频繁，请稍后再试"
+) : BusinessException(HttpStatus.TOO_MANY_REQUESTS, message)

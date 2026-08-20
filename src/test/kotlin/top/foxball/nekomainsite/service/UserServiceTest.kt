@@ -45,4 +45,20 @@ class UserServiceTest @Autowired constructor(
         assertThrows(ConflictException::class.java) { service.disableUserById(adminId) }
         assertTrue(users.findById(adminId).orElseThrow().enabled)
     }
+
+    @Test
+    fun `listUsers returns created accounts without password fields`() {
+        val created = service.createUser(CreateUserCommand(
+            username = "list-target",
+            email = "list-target@example.com",
+            password = "a-secure-test-password",
+            role = "USER",
+            displayName = "列表成员",
+            enabled = true,
+        ))
+        val listed = service.listUsers()
+        val view = listed.firstOrNull { it.id == created.id } ?: error("created user missing from list")
+        assertEquals("list-target", view.username)
+        assertTrue(view.toString().contains("list-target"))
+    }
 }

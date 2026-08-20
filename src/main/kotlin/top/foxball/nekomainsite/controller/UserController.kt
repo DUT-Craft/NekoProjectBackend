@@ -30,6 +30,10 @@ class UserController(
     private val userService: UserService,
     private val builder: ResponseBuilder,
 ) {
+    @GetMapping
+    fun listUsers(): ResponseEntity<ApiResponse> =
+        builder.ok().data(userService.listUsers()).build()
+
     @PostMapping("/Register")
     fun createUser(@Valid @RequestBody request: CreateUserRequest): ResponseEntity<ApiResponse> =
         builder.ok().data(userService.createUser(request.toCommand())).build()
@@ -51,12 +55,20 @@ class UserController(
     }
 
     @PutMapping("/{id}")
-    fun updateUser(@PathVariable id: Long, @Valid @RequestBody request: UpdateUserRequest): ResponseEntity<ApiResponse> =
-        builder.ok().data(userService.updateUser(request.toCommand(id))).build()
+    fun updateUser(
+        authentication: Authentication?,
+        @PathVariable id: Long,
+        @Valid @RequestBody request: UpdateUserRequest,
+    ): ResponseEntity<ApiResponse> {
+        preventSelfLockout(authentication.userId(), id, request.role, request.enabled)
+        return builder.ok().data(userService.updateUser(request.toCommand(id))).build()
+    }
 
     @PutMapping("/Batch")
-    fun updateUsers(@Valid @RequestBody requests: List<BatchUpdateUserRequest>): ResponseEntity<ApiResponse> {
+    fun updateUsers(authentication: Authentication?, @Valid @RequestBody requests: List<BatchUpdateUserRequest>): ResponseEntity<ApiResponse> {
         validateBatchSize(requests.size)
+        val currentUserId = authentication.userId()
+        requests.forEach { preventSelfLockout(currentUserId, it.id, it.role, it.enabled) }
         return builder.ok().data(userService.updateUsers(requests.map(BatchUpdateUserRequest::toCommand))).build()
     }
 
@@ -111,6 +123,12 @@ class UserController(
 
     private fun validateBatchSize(size: Int) {
         if (size !in 1..MAX_BATCH_SIZE) throw ParamErrorException("批量操作每次只允许 1 到 $MAX_BATCH_SIZE 条记录")
+    }
+
+    private fun preventSelfLockout(currentUserId: Long?, targetId: Long, targetRole: String, targetEnabled: Boolean) {
+        if (currentUserId == targetId && (!targetEnabled || !targetRole.equals("ADMIN", ignoreCase = true))) {
+            throw ConflictException("不能停用当前登录账号或移除自己的管理员权限")
+        }
     }
 
     private fun Authentication?.userId(): Long? = this?.principal as? Long
