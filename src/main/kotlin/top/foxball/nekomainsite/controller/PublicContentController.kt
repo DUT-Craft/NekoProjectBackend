@@ -12,8 +12,10 @@ import org.springframework.web.bind.annotation.PostMapping
 import org.springframework.web.bind.annotation.RequestBody
 import org.springframework.web.bind.annotation.RequestMapping
 import org.springframework.web.bind.annotation.RestController
+import top.foxball.nekomainsite.authentication.SubmissionRateLimiter
 import top.foxball.nekomainsite.entity.jdbc.ApplicationKind
 import top.foxball.nekomainsite.handlder.ParamErrorException
+import top.foxball.nekomainsite.handlder.TooManyRequestsException
 import top.foxball.nekomainsite.service.ActivityView
 import top.foxball.nekomainsite.service.ApplicationCommand
 import top.foxball.nekomainsite.service.FeedbackCommand
@@ -27,6 +29,7 @@ import top.foxball.nekomainsite.shared.Response as ApiResponse
 @RequestMapping("/api/public")
 class PublicContentController(
     private val siteContentService: SiteContentService,
+    private val submissionRateLimiter: SubmissionRateLimiter,
     private val builder: ResponseBuilder,
 ) {
     @GetMapping("/home")
@@ -71,23 +74,30 @@ class PublicContentController(
     @GetMapping("/applications")
     fun applications(): ResponseEntity<ApiResponse> = builder.ok().data(mapOf("submissionRequiresLogin" to true)).build()
 
+    @GetMapping("/applications/mine")
+    fun myApplications(authentication: Authentication?): ResponseEntity<ApiResponse> =
+        builder.ok().data(siteContentService.memberApplications(authentication.userId())).build()
+
     @PostMapping("/applications")
     fun submitApplication(
         authentication: Authentication?,
         @Valid @RequestBody request: ApplicationRequest,
     ): ResponseEntity<ApiResponse> {
+        ensureAllowed(authentication, "applications")
         val id = siteContentService.submitApplication(authentication.userId(), request.toCommand())
         return builder.ok().data(mapOf("id" to id, "status" to "PENDING")).build()
     }
 
     @PostMapping("/ideas")
     fun submitIdea(authentication: Authentication?, @Valid @RequestBody request: IdeaRequest): ResponseEntity<ApiResponse> {
+        ensureAllowed(authentication, "ideas")
         val id = siteContentService.submitIdea(authentication.userId(), IdeaCommand(request.title, request.category, request.description))
         return builder.ok().data(mapOf("id" to id, "status" to "PENDING")).build()
     }
 
     @PostMapping("/ideas/{id}/like")
     fun likeIdea(authentication: Authentication?, @PathVariable id: Long): ResponseEntity<ApiResponse> {
+        ensureAllowed(authentication, "likes", limit = LIKE_LIMIT)
         val likes = siteContentService.likeIdea(authentication.userId(), id)
         return builder.ok().data(mapOf("id" to id, "likes" to likes)).build()
     }
@@ -98,17 +108,33 @@ class PublicContentController(
         @PathVariable slug: String,
         @Valid @RequestBody request: RegistrationRequest,
     ): ResponseEntity<ApiResponse> {
+        ensureAllowed(authentication, "registrations")
         val id = siteContentService.registerActivity(authentication.userId(), slug, RegistrationCommand(request.minecraftId, request.qq))
         return builder.ok().data(mapOf("id" to id, "status" to "PENDING")).build()
     }
 
     @PostMapping("/feedback")
     fun submitFeedback(authentication: Authentication?, @Valid @RequestBody request: FeedbackRequest): ResponseEntity<ApiResponse> {
+        ensureAllowed(authentication, "feedback")
         val id = siteContentService.submitFeedback(authentication.userId(), FeedbackCommand(request.body))
         return builder.ok().data(mapOf("id" to id, "status" to "OPEN")).build()
     }
 
+    private fun ensureAllowed(authentication: Authentication?, resource: String, limit: Int = SUBMISSION_LIMIT) {
+        val userId = authentication?.principal as? Long ?: return
+        val key = "$userId|$resource"
+        if (!submissionRateLimiter.allow(key, limit, WINDOW_MS)) {
+            throw TooManyRequestsException("操作过于频繁，请稍后再试")
+        }
+    }
+
     private fun Authentication?.userId(): Long? = (this?.principal as? Long)
+
+    private companion object {
+        const val SUBMISSION_LIMIT = 5
+        const val LIKE_LIMIT = 30
+        const val WINDOW_MS = 10 * 60 * 1000L
+    }
 
     data class ApplicationRequest(
         @field:NotBlank @field:Size(max = 30) val kind: String,

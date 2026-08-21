@@ -52,6 +52,10 @@ class AdminContentController(
     fun updateApplication(authentication: Authentication?, @PathVariable id: Long, @Valid @RequestBody request: ModerationRequest): ResponseEntity<ApiResponse> =
         builder.ok().data(adminContentService.updateApplication(authentication.operatorId(), id, request.status, request.note)).build()
 
+    @DeleteMapping("/applications/{id}")
+    fun deleteApplication(authentication: Authentication?, @PathVariable id: Long): ResponseEntity<ApiResponse> =
+        builder.ok().data(adminContentService.deleteApplication(authentication.operatorId(), id)).build()
+
     @PatchMapping("/feedback/{id}")
     fun updateFeedback(authentication: Authentication?, @PathVariable id: Long, @Valid @RequestBody request: FeedbackModerationRequest): ResponseEntity<ApiResponse> =
         builder.ok().data(adminContentService.updateFeedback(authentication.operatorId(), id, request.status, request.note)).build()

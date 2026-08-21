@@ -5,6 +5,7 @@ import jakarta.validation.Valid
 import jakarta.validation.constraints.NotBlank
 import jakarta.validation.constraints.Size
 import org.springframework.http.HttpHeaders
+import org.springframework.http.HttpStatus
 import org.springframework.http.ResponseCookie
 import org.springframework.http.ResponseEntity
 import org.springframework.security.core.Authentication
@@ -14,8 +15,11 @@ import org.springframework.web.bind.annotation.RequestBody
 import org.springframework.web.bind.annotation.RequestMapping
 import org.springframework.web.bind.annotation.RequestParam
 import org.springframework.web.bind.annotation.RestController
+import top.foxball.nekomainsite.authentication.LoginAttemptLimiter
 import top.foxball.nekomainsite.authentication.LoginTokenAuthentication
 import top.foxball.nekomainsite.config.JwtProperties
+import top.foxball.nekomainsite.handlder.UserDisabledException
+import top.foxball.nekomainsite.handlder.UsernameOrPasswordErrorException
 import top.foxball.nekomainsite.service.AuthService
 import top.foxball.nekomainsite.service.BlessingSkinAuthService
 import top.foxball.nekomainsite.shared.ResponseBuilder
@@ -28,12 +32,28 @@ class AuthController(
     private val loginTokenAuthentication: LoginTokenAuthentication,
     private val blessingSkinAuthService: BlessingSkinAuthService,
     private val jwtProperties: JwtProperties,
+    private val loginAttemptLimiter: LoginAttemptLimiter,
     private val builder: ResponseBuilder,
 ) {
     @PostMapping("/login")
     fun login(@Valid @RequestBody request: LoginRequest, http: HttpServletRequest): ResponseEntity<ApiResponse> {
-        val result = authService.login(request.username.trim(), request.password, http.getHeader("User-Agent").orEmpty())
-        return authenticatedResponse(result, "登录失败")
+        val key = "${request.username.trim().lowercase()}|${clientIp(http)}"
+        if (loginAttemptLimiter.isLocked(key)) {
+            return builder.status(HttpStatus.TOO_MANY_REQUESTS)
+                .message("尝试次数过多，请稍后再试")
+                .build()
+        }
+        return try {
+            val result = authService.login(request.username.trim(), request.password, http.getHeader("User-Agent").orEmpty())
+            loginAttemptLimiter.recordSuccess(key)
+            authenticatedResponse(result, "登录失败")
+        } catch (ex: UsernameOrPasswordErrorException) {
+            loginAttemptLimiter.recordFailure(key)
+            throw ex
+        } catch (ex: UserDisabledException) {
+            loginAttemptLimiter.recordFailure(key)
+            throw ex
+        }
     }
 
     @GetMapping("/me")
@@ -81,6 +101,17 @@ class AuthController(
         val header = request.getHeader("Authorization")
         if (header?.startsWith("Bearer ", ignoreCase = true) == true) return header.substring(7).trim()
         return request.cookies?.firstOrNull { it.name == "neko_auth" }?.value
+    }
+
+    private fun clientIp(request: HttpServletRequest): String {
+        return normalizeIp(request.remoteAddr) ?: "unknown"
+    }
+
+    private fun normalizeIp(value: String?): String? {
+        val candidate = value?.trim()?.lowercase()?.takeIf { it.length in 2..64 } ?: return null
+        return candidate.takeIf { address ->
+            address.any { it == '.' || it == ':' } && address.all { it.isDigit() || it in 'a'..'f' || it == '.' || it == ':' }
+        }
     }
 
     private fun authCookie(token: String): ResponseCookie = ResponseCookie.from("neko_auth", token)

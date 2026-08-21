@@ -73,6 +73,7 @@ data class AdminServerStatusView(
 )
 
 data class AdminPublicationView(val id: Long, val published: Boolean)
+data class AdminDeletionView(val id: Long, val deleted: Boolean)
 
 @Service
 @Transactional(readOnly = true)
@@ -115,6 +116,14 @@ class AdminContentService(
         val result = siteContentService.updateApplicationStatus(id, status, note)
         audit(operatorId, "APPLICATION", id.toString(), "MODERATE_${status.name}")
         return result
+    }
+
+    @Transactional
+    fun deleteApplication(operatorId: Long?, id: Long): AdminDeletionView {
+        val application = applicationRepository.findById(id).orElseThrow { ResourceNotFoundException("申请不存在") }
+        applicationRepository.delete(application)
+        audit(operatorId, "APPLICATION", id.toString(), "DELETE")
+        return AdminDeletionView(id, true)
     }
 
     @Transactional
@@ -192,7 +201,7 @@ class AdminContentService(
         return AdminPublicationView(id, false)
     }
 
-    fun auditLogs(): List<AdminAuditLogView> = auditLogRepository.findAllByOrderByCreatedAtDesc().map {
+    fun auditLogs(): List<AdminAuditLogView> = auditLogRepository.findTop200ByOrderByCreatedAtDesc().map {
         AdminAuditLogView(
             id = it.id.requirePresent("AuditLog.id"),
             operatorUserId = it.operatorUserId,

@@ -106,6 +106,11 @@ data class AdminApplicationView(
     val skill: String?, val status: String, val adminNote: String?, val createdAt: String, val updatedAt: String,
 )
 
+data class MemberApplicationView(
+    val id: Long, val kind: String, val name: String, val status: String,
+    val adminNote: String?, val createdAt: String, val updatedAt: String,
+)
+
 data class AdminIdeaView(
     val id: Long, val userId: Long?, val nickname: String, val title: String, val category: String,
     val description: String, val status: String, val publicReply: String?, val relatedSlug: String?,
@@ -248,6 +253,9 @@ class SiteContentService(
     }
 
     fun adminApplications(): List<AdminApplicationView> = applicationRepository.findAllByOrderByCreatedAtDesc().map(::adminApplicationView)
+    fun memberApplications(userId: Long?): List<MemberApplicationView> =
+        applicationRepository.findAllByUserIdOrderByCreatedAtDesc(requiredUser(userId).id.requirePresent("User.id"))
+            .map(::memberApplicationView)
     fun adminIdeas(): List<AdminIdeaView> = ideaRepository.findAllByOrderByCreatedAtDesc().map(::adminIdeaView)
     fun adminRegistrations(): List<AdminRegistrationView> = registrationRepository.findAllByOrderByCreatedAtDesc().map(::adminRegistrationView)
     fun adminFeedback(): List<AdminFeedbackView> = feedbackRepository.findAllByOrderByCreatedAtDesc().map(::adminFeedbackView)
@@ -387,6 +395,11 @@ class SiteContentService(
         item.id.requirePresent("Application.id"), item.userId, item.kind.name, item.name, item.studentId, item.qq, item.minecraftId,
         item.reason, item.participantCount, item.purpose, item.expectedTime, item.requirements,
         item.availableTime, item.skill, item.status.name, item.adminNote, item.createdAt.toString(), item.updatedAt.toString(),
+    )
+
+    private fun memberApplicationView(item: Application) = MemberApplicationView(
+        item.id.requirePresent("Application.id"), item.kind.name, item.name, item.status.name,
+        item.adminNote, item.createdAt.toString(), item.updatedAt.toString(),
     )
 
     private fun adminIdeaView(item: Idea) = AdminIdeaView(

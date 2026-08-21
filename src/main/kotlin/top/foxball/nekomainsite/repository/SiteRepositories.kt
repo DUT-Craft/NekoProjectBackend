@@ -57,6 +57,7 @@ interface HistoryItemRepository : JpaRepository<HistoryItem, Long> {
 interface ApplicationRepository : JpaRepository<Application, Long> {
     fun findByStatusOrderByCreatedAtDesc(status: ModerationStatus): List<Application>
     fun countByStatus(status: ModerationStatus): Long
+    fun findAllByUserIdOrderByCreatedAtDesc(userId: Long): List<Application>
     fun findAllByOrderByCreatedAtDesc(): List<Application>
 }
 
@@ -88,6 +89,7 @@ interface PrivateFeedbackRepository : JpaRepository<PrivateFeedback, Long> {
 
 interface AuditLogRepository : JpaRepository<top.foxball.nekomainsite.entity.jdbc.AuditLog, Long> {
     fun findAllByOrderByCreatedAtDesc(): List<top.foxball.nekomainsite.entity.jdbc.AuditLog>
+    fun findTop200ByOrderByCreatedAtDesc(): List<top.foxball.nekomainsite.entity.jdbc.AuditLog>
 }
 
 interface ContentDraftRepository : JpaRepository<ContentDraft, String> {

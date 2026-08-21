@@ -21,6 +21,8 @@ class UserServiceImpl(
     private val passwordEncoder: PasswordEncoder,
 ) : UserService {
 
+    override fun listUsers(): List<UserAdminView> = userRepository.findAllByOrderByCreatedAtDesc().map(::view)
+
     @Transactional
     override fun createUser(command: CreateUserCommand): UserAdminView {
         val normalized = normalize(command)
