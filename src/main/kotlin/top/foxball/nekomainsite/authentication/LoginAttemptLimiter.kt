@@ -39,7 +39,7 @@ class LoginAttemptLimiter {
     /** 记录一次失败；达到阈值后进入锁定。 */
     fun recordFailure(key: String, now: Long = System.currentTimeMillis()) = synchronized(lock) {
         cleanupIfDue(now)
-        if (key !in states && states.size >= MAX_TRACKED_KEYS) removeOldest()
+        if (key !in states && states.size >= MAX_TRACKED_KEYS && !removeOldestUnlocked(now)) return@synchronized
         val state = states.getOrPut(key) { State() }
         if (now < state.lockedUntil) return@synchronized
         state.failureTimes.removeAll { it < now - FAILURE_WINDOW_MS }
@@ -75,12 +75,16 @@ class LoginAttemptLimiter {
         nextCleanupAt = now + CLEANUP_INTERVAL_MS
     }
 
-    private fun removeOldest() {
+    private fun removeOldestUnlocked(now: Long): Boolean {
         val iterator = states.entries.iterator()
-        if (iterator.hasNext()) {
-            iterator.next()
-            iterator.remove()
+        while (iterator.hasNext()) {
+            val entry = iterator.next()
+            if (entry.value.lockedUntil <= now) {
+                iterator.remove()
+                return true
+            }
         }
+        return false
     }
 
     companion object {

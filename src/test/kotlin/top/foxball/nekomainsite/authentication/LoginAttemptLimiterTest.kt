@@ -79,4 +79,17 @@ class LoginAttemptLimiterTest {
 
         assertTrue(limiter.trackedKeyCount() <= LoginAttemptLimiter.MAX_TRACKED_KEYS)
     }
+
+    @Test
+    fun `capacity pressure never evicts an active lock`() {
+        val lockedKey = "admin|192.0.2.1"
+        repeat(LoginAttemptLimiter.MAX_FAILURES) { limiter.recordFailure(lockedKey, now = 1_000L + it) }
+
+        repeat(LoginAttemptLimiter.MAX_TRACKED_KEYS + 100) { index ->
+            limiter.recordFailure("user-$index|192.0.2.1", now = 10_000L)
+        }
+
+        assertTrue(limiter.isLocked(lockedKey, now = 10_001L))
+        assertTrue(limiter.trackedKeyCount() <= LoginAttemptLimiter.MAX_TRACKED_KEYS)
+    }
 }
