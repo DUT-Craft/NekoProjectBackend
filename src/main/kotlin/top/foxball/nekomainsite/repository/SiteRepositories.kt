@@ -57,6 +57,7 @@ interface HistoryItemRepository : JpaRepository<HistoryItem, Long> {
 interface ApplicationRepository : JpaRepository<Application, Long> {
     fun findByStatusOrderByCreatedAtDesc(status: ModerationStatus): List<Application>
     fun countByStatus(status: ModerationStatus): Long
+    fun findAllByUserIdOrderByCreatedAtDesc(userId: Long): List<Application>
     fun findAllByOrderByCreatedAtDesc(): List<Application>
 }
 

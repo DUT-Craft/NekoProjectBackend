@@ -74,6 +74,10 @@ class PublicContentController(
     @GetMapping("/applications")
     fun applications(): ResponseEntity<ApiResponse> = builder.ok().data(mapOf("submissionRequiresLogin" to true)).build()
 
+    @GetMapping("/applications/mine")
+    fun myApplications(authentication: Authentication?): ResponseEntity<ApiResponse> =
+        builder.ok().data(siteContentService.memberApplications(authentication.userId())).build()
+
     @PostMapping("/applications")
     fun submitApplication(
         authentication: Authentication?,
