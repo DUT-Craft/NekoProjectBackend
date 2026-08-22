@@ -14,7 +14,9 @@ import top.foxball.nekomainsite.entity.jdbc.ApplicationKind
 import top.foxball.nekomainsite.entity.jdbc.Server
 import top.foxball.nekomainsite.entity.jdbc.ServerCategory
 import top.foxball.nekomainsite.entity.jdbc.ServerStatus
+import top.foxball.nekomainsite.handlder.ConflictException
 import top.foxball.nekomainsite.handlder.ParamErrorException
+import top.foxball.nekomainsite.handlder.ResourceNotFoundException
 import top.foxball.nekomainsite.repository.ActivityRepository
 import top.foxball.nekomainsite.repository.ApplicationRepository
 import top.foxball.nekomainsite.repository.ServerRepository
@@ -127,6 +129,27 @@ class SiteContentServiceTest @Autowired constructor(
         assertTrue(position.getValue("contract-weekly-upcoming") < position.getValue("contract-long-term"))
         assertTrue(position.getValue("contract-long-term") < position.getValue("contract-limited"))
         assertTrue(position.getValue("contract-limited") < position.getValue("contract-weekly-paused"))
+    }
+
+    @Test
+    fun `activity registration reports unpublished as missing and paused as conflict`() {
+        val userId = users.findByUsername("admin")?.id ?: error("local admin missing")
+        activities.saveAll(listOf(
+            activity("register-open", ActivityKind.WEEKLY, ActivityStatus.UPCOMING, priority = 1),
+            activity("register-paused", ActivityKind.WEEKLY, ActivityStatus.PAUSED, priority = 2),
+            activity("register-hidden", ActivityKind.WEEKLY, ActivityStatus.UPCOMING, priority = 3).apply { published = false },
+        ))
+
+        assertTrue(service.registerActivity(userId, "register-open", RegistrationCommand("NekoPlayer", "12345678")) > 0)
+        assertThrows(ConflictException::class.java) {
+            service.registerActivity(userId, "register-paused", RegistrationCommand("NekoPaused", "22345678"))
+        }
+        assertThrows(ResourceNotFoundException::class.java) {
+            service.registerActivity(userId, "register-hidden", RegistrationCommand("NekoHidden", "32345678"))
+        }
+        assertThrows(ResourceNotFoundException::class.java) {
+            service.registerActivity(userId, "register-missing", RegistrationCommand("NekoGhost", "42345678"))
+        }
     }
 
     private fun server(slug: String, category: ServerCategory, status: ServerStatus, online: Int = 0) = Server(

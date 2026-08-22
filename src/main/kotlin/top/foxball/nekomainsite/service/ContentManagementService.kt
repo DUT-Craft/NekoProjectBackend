@@ -4,6 +4,7 @@ import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
 import tools.jackson.databind.JsonNode
 import tools.jackson.databind.ObjectMapper
+import tools.jackson.databind.node.ObjectNode
 import top.foxball.nekomainsite.entity.jdbc.Activity
 import top.foxball.nekomainsite.entity.jdbc.ActivityKind
 import top.foxball.nekomainsite.entity.jdbc.ActivityStatus
@@ -365,11 +366,22 @@ class ContentManagementService(
         lastCheckedAt: String? = null,
     ): AdminContentSummary {
         val draft = id?.let { draftRepository.findByResourceTypeAndResourceId(type, it) }
-        val hasUnpublishedChanges = draft?.let { currentPayloadJson(type, id) != it.payloadJson } ?: false
+        val hasUnpublishedChanges = draft?.let {
+            contentFingerprint(type, currentPayloadJson(type, id)) != contentFingerprint(type, it.payloadJson)
+        } ?: false
         return AdminContentSummary(
             id, slug, title, status, published, updatedAt.toString(), draft?.id, hasUnpublishedChanges,
             onlineCount, capacity, maintenance, lastCheckedAt,
         )
+    }
+
+    /** 去掉发布状态等生命周期字段后的内容指纹，用于判断草稿是否有真实内容差异。 */
+    private fun contentFingerprint(type: String, payloadJson: String): String {
+        val node = runCatching { objectMapper.readTree(payloadJson) }.getOrNull() ?: return payloadJson
+        val objectNode = node as? ObjectNode ?: return node.toString()
+        val lifecycleFields = if (type == "ANNOUNCEMENT") listOf("status") else listOf("published")
+        lifecycleFields.forEach(objectNode::remove)
+        return objectNode.toString()
     }
 
     private fun draftSummary(draft: ContentDraft): AdminContentSummary {

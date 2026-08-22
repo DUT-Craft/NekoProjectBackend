@@ -18,6 +18,7 @@ import org.springframework.web.bind.annotation.ExceptionHandler
 import org.springframework.web.bind.annotation.RestControllerAdvice
 import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException
 import org.springframework.web.multipart.MaxUploadSizeExceededException
+import org.springframework.web.multipart.support.MissingServletRequestPartException
 import org.springframework.web.servlet.NoHandlerFoundException
 import org.springframework.web.servlet.resource.NoResourceFoundException
 import top.foxball.nekomainsite.shared.Response
@@ -69,6 +70,13 @@ class GlobalExceptionHandler(
     fun onMissingServletRequestParameterException(ex: MissingServletRequestParameterException): ResponseEntity<Response> {
         return builder.badRequest()
             .message("Required parameter \"${ex.parameterName}\" is not provided!")
+            .build()
+    }
+
+    @ExceptionHandler(MissingServletRequestPartException::class)
+    fun onMissingServletRequestPartException(ex: MissingServletRequestPartException): ResponseEntity<Response> {
+        return builder.badRequest()
+            .message("Required request part \"${ex.requestPartName}\" is not provided!")
             .build()
     }
 

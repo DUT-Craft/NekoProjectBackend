@@ -205,6 +205,30 @@ class ContentManagementServiceTest @Autowired constructor(
     }
 
     @Test
+    fun `unpublishing alone does not flag identical drafts as changed`() {
+        val server = service.list("servers").first { it.slug == "redstone" }
+        val serverId = requireNotNull(server.id)
+        service.createDraft("servers", serverId, 1L)
+        assertFalse(service.list("servers").single { it.id == serverId }.hasUnpublishedChanges)
+
+        service.unpublish("servers", serverId, 1L)
+        assertFalse(service.list("servers").single { it.id == serverId }.hasUnpublishedChanges)
+
+        val draft = service.createDraft("announcements", null, 1L)
+        val saved = service.saveDraft(draft.id, draft.version, announcementPayload("下线误报摘要", "下线误报正文"), 1L)
+        val published = service.publish(draft.id, saved.version, 1L)
+        val resourceId = requireNotNull(published.resourceId)
+        assertFalse(service.list("announcements").single { it.id == resourceId }.hasUnpublishedChanges)
+
+        service.unpublish("announcements", resourceId, 1L)
+        assertFalse(service.list("announcements").single { it.id == resourceId }.hasUnpublishedChanges)
+
+        val changed = service.saveDraft(published.id, published.version, announcementPayload("真的修改了内容", "下线误报正文"), 1L)
+        assertTrue(changed.version > published.version)
+        assertTrue(service.list("announcements").single { it.id == resourceId }.hasUnpublishedChanges)
+    }
+
+    @Test
     fun `word style inline formatting is stored and published safely`() {
         val draft = service.createDraft("announcements", null, 1L)
         val payload = objectMapper.readTree(

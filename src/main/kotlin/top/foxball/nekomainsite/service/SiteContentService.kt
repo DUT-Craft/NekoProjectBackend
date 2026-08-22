@@ -236,7 +236,8 @@ class SiteContentService(
     fun registerActivity(userId: Long?, activitySlug: String, command: RegistrationCommand): Long {
         val user = requiredUser(userId)
         val activity = activityRepository.findBySlug(activitySlug) ?: throw ResourceNotFoundException("活动不存在")
-        if (!activity.published || activity.status == ActivityStatus.PAUSED) throw ConflictException("该活动暂不接受报名")
+        if (!activity.published) throw ResourceNotFoundException("活动不存在")
+        if (activity.status == ActivityStatus.PAUSED) throw ConflictException("该活动暂不接受报名")
         val persistedUserId = user.id.requirePresent("User.id")
         if (registrationRepository.existsByActivitySlugAndUserId(activitySlug, persistedUserId)) throw ConflictException("你已经报名过这个活动了")
         return registrationRepository.save(ActivityRegistration(
